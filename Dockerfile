@@ -1,5 +1,5 @@
 # 影室 image-studio：stage1 构建前端，stage2 编译 Go（无 CGO），stage3 最小运行镜像
-FROM --platform=$BUILDPLATFORM node:22-alpine AS web
+FROM --platform=$BUILDPLATFORM node:22-slim AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
