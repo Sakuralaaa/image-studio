@@ -29,16 +29,9 @@ export default function App() {
 
 export function Seal({ size = 28 }: { size?: number }) {
   return (
-    <svg className="seal" width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <defs>
-        <linearGradient id="seal-g" x1="4" y1="2" x2="28" y2="30" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="var(--seal-a)" />
-          <stop offset="1" stopColor="var(--seal-b)" />
-        </linearGradient>
-      </defs>
-      <rect x="2" y="2" width="28" height="28" rx="8.5" fill="url(#seal-g)" />
-      <circle cx="16" cy="16" r="11.2" stroke="var(--seal-fg)" strokeWidth="1.9" />
-      <path d="M16.00 11.40L27.06 17.78M19.98 13.70L19.98 26.47M19.98 18.30L8.93 24.68M16.00 20.60L4.94 14.22M12.02 18.30L12.02 5.53M12.02 13.70L23.07 7.32" stroke="var(--seal-fg)" strokeWidth="1.9" strokeLinecap="round" />
+    <svg className="seal" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M21.75 6.04 L22.80 6.65 L23.78 7.36 L24.69 8.18 L25.50 9.09 L26.23 10.10 L26.84 11.17 L27.34 12.31 L27.72 13.51 L27.97 14.74 L28.09 16.00 L28.07 17.27 L27.92 18.53 L27.63 19.78 L27.21 20.99 L26.66 22.15 L25.99 23.26 L25.20 24.28 L24.30 25.22 L23.31 26.06 L22.23 26.78 L21.07 27.39 L19.86 27.87 L18.60 28.22 L17.31 28.43 L16.00 28.50 L14.69 28.43 L13.40 28.22 L12.14 27.87 L10.93 27.39 L9.77 26.78 L8.69 26.06 L7.70 25.22 L6.80 24.28 L6.01 23.26 L5.34 22.15 L4.79 20.99 L4.37 19.78 L4.08 18.53 L3.93 17.27 L3.91 16.00 L4.03 14.74 L4.28 13.51 L4.66 12.31 L5.16 11.17 L5.77 10.10 L6.50 9.09 L7.31 8.18 L8.22 7.36 L9.20 6.65 L10.25 6.04 L10.75 6.91 L9.87 7.56 L9.06 8.29 L8.34 9.10 L7.71 9.97 L7.17 10.90 L6.74 11.88 L6.42 12.89 L6.20 13.92 L6.09 14.96 L6.09 16.00 L6.19 17.03 L6.40 18.04 L6.71 19.02 L7.11 19.96 L7.61 20.85 L8.19 21.68 L8.85 22.44 L9.58 23.13 L10.37 23.74 L11.23 24.27 L12.12 24.71 L13.06 25.05 L14.02 25.30 L15.01 25.45 L16.00 25.50 L16.99 25.45 L17.98 25.30 L18.94 25.05 L19.88 24.71 L20.77 24.27 L21.63 23.74 L22.42 23.13 L23.15 22.44 L23.81 21.68 L24.39 20.85 L24.89 19.96 L25.29 19.02 L25.60 18.04 L25.81 17.03 L25.91 16.00 L25.91 14.96 L25.80 13.92 L25.58 12.89 L25.26 11.88 L24.83 10.90 L24.29 9.97 L23.66 9.10 L22.94 8.29 L22.13 7.56 L21.25 6.91Z" fill="currentColor" />
+      <circle cx="16" cy="16" r="3" fill="currentColor" />
     </svg>
   )
 }
