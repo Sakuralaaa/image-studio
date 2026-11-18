@@ -7,7 +7,7 @@ import { ImageTile, Lightbox, useImageActions } from '../components/gallery'
 import { useSentinel } from '../components/useImages'
 import { Composer } from '../components/composer'
 import { useApplyMarket } from '../components/market'
-import { aspectNumber, fmtDuration, fmtTime } from '../labels'
+import { aspectNumber, fmtDuration } from '../labels'
 
 const PAGE = 30
 const isActive = (j: Job) => j.status === 'queued' || j.status === 'running'
@@ -139,14 +139,6 @@ function JobView({ job, onRetry, onDrop, onPatch, onRemove }: {
 
   return (
     <section className="jv">
-      <header className="jv-head">
-        <p className="jv-prompt" data-clamp title={job.prompt}>{job.prompt}</p>
-        <div className="jv-meta">
-          <span>{job.model}</span>
-          <span>{fmtTime(job.created_at)}</span>
-          {job.status === 'done' && job.duration_ms > 0 && <span>{fmtDuration(job.duration_ms)}</span>}
-        </div>
-      </header>
       {job.status === 'failed' ? (
         <div className="jv-fail">
           <AlertTriangle size={22} />
