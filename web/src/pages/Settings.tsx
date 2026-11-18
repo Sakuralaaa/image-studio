@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Pencil, Trash2, Plug, RefreshCw, Check, Search, Route as RouteIcon, KeyRound, Lock, ArrowUp, ArrowDown, X } from 'lucide-react'
+import { Plus, Pencil, Trash2, Plug, RefreshCw, Check, Search, KeyRound, Lock, ArrowUp, ArrowDown, X } from 'lucide-react'
 import { api, type Cap, type Caps, type Channel, type Preset } from '../api'
 import { useStore } from '../store'
 import { Empty, Modal, Segmented, Select, Spinner, TagInput } from '../components/ui'
@@ -65,7 +65,6 @@ function Channels() {
                 <span className="mini-tag">{c.models.length} 个模型</span>
                 {c.key_tail && <span className="mini-tag"><KeyRound size={12} />{c.key_tail}</span>}
                 {c.hidden && <span className="mini-tag"><Lock size={12} />仅管理员</span>}
-                {c.tool_path_at > 0 && <span className="mini-tag is-warn"><RouteIcon size={12} />对话工具链路</span>}
               </div>
               <CapSummary caps={c.caps} />
             </div>

@@ -186,6 +186,8 @@ func runJob(id int64, ch *Channel, in JobIn, want int) {
 	}
 	if toolPath {
 		_, _ = db.Exec(`UPDATE channels SET tool_path_at=? WHERE id=?`, now(), ch.ID)
+	} else if len(all) > 0 {
+		_, _ = db.Exec(`UPDATE channels SET tool_path_at=0 WHERE id=?`, ch.ID) // 恢复正常后清除标记
 	}
 	if len(all) == 0 {
 		msg := "没有返回图片"

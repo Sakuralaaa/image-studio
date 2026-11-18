@@ -59,7 +59,7 @@ export function ParamControls({ channel, params, onChange, compact, size = 'md' 
   const nMax = c.n?.mode === 'off' ? 1 : Math.max(1, c.n?.max || 1)
   const rows: JSX.Element[] = []
   const row = (key: string, label: string, ctl: JSX.Element, locked = false) => (
-    <div className={`prow ${locked ? 'is-locked' : ''}`} key={key} title={locked ? '当前走对话工具链路' : undefined}>
+    <div className={`prow ${locked ? 'is-locked' : ''}`} key={key} title={locked ? '这个模型暂时不支持调整此项' : undefined}>
       <div className="prow-label">{label}</div>{ctl}
     </div>
   )

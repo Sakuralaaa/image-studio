@@ -233,7 +233,6 @@ export function Lightbox({ list, index, onIndex, onClose, actions, onChange, alb
               <dt>耗时</dt><dd>{fmtDuration(r.duration_ms)}</dd>
               <dt>时间</dt><dd>{fmtTime(img.created_at)}</dd>
               {!img.favorite && !!img.expires_at && <><dt>保留至</dt><dd className="is-warn">{fmtTime(img.expires_at)}</dd></>}
-              {r.tool_path && <><dt>链路</dt><dd>对话工具链路</dd></>}
             </dl>
           </section>
           {img.favorite && (
