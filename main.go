@@ -23,7 +23,7 @@ import (
 var webFS embed.FS
 
 var (
-	version   = "0.1.0"
+	version   = "0.2.0"
 	dataDir   string
 	adminPass string
 	secret    []byte
@@ -39,6 +39,9 @@ func main() {
 		}
 	}
 	if err := openDB(dataDir); err != nil {
+		log.Fatal(err)
+	}
+	if err := marketInit(); err != nil {
 		log.Fatal(err)
 	}
 	s := getSetting("session_secret", "")
@@ -86,6 +89,15 @@ func routes(m *http.ServeMux) {
 	a("POST /api/channels/order", handleChannelOrder)
 
 	a("POST /api/refs", handleRefUpload)
+	a("POST /api/refs/url", handleRefFromURL)
+
+	a("GET /api/market", handleMarketList)
+	a("POST /api/market/refresh", handleMarketRefresh)
+	a("GET /api/market/img", handleMarketImg)
+	a("GET /api/market/hero", handleHero)
+	a("GET /api/market/favs", handleMarketFavList)
+	a("POST /api/market/favs", handleMarketFavAdd)
+	a("POST /api/market/favs/delete", handleMarketFavDel)
 	a("GET /files/refs/{name}", serveDir("refs"))
 	a("GET /files/images/{name}", serveDir("images"))
 	a("GET /files/thumbs/{name}", serveDir("thumbs"))

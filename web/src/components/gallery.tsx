@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, Copy, Download, Heart, RotateCcw, Trash2, X, Check, FolderOpen } from 'lucide-react'
 import { api, type Img } from '../api'
@@ -47,31 +47,124 @@ export function useImageActions(onChange: (img: Img) => void, onRemove: (id: num
   }
 }
 
+// ---------- 等高行图库（两端对齐） ----------
+export const GAP = 8
+const clampAspect = (a: number) => Math.min(2.4, Math.max(0.5, a || 1))
+
+export function targetHeight(w: number) {
+  if (w < 520) return 168
+  if (w < 900) return 200
+  return 248
+}
+
+interface Row { idx: number[]; h: number; partial: boolean }
+
+export function layoutRows(aspects: number[], W: number, T: number): Row[] {
+  const rows: Row[] = []
+  const hOf = (sum: number, n: number) => (W - GAP * (n - 1)) / sum
+  let cur: number[] = []
+  let sum = 0
+  aspects.forEach((raw, i) => {
+    const a = clampAspect(raw)
+    if (cur.length) {
+      const hc = hOf(sum, cur.length)
+      const hn = hOf(sum + a, cur.length + 1)
+      if (hn < T && Math.abs(hn - T) > Math.abs(hc - T)) {
+        rows.push({ idx: cur, h: hc, partial: false })
+        cur = []; sum = 0
+      }
+    }
+    cur.push(i); sum += a
+  })
+  if (cur.length) {
+    const h = hOf(sum, cur.length)
+    if (h <= T * 1.25) rows.push({ idx: cur, h, partial: false })
+    else if (rows.length) {
+      // 末行不满：与上一行合并后重新切成两行，让两行都两端对齐
+      const prev = rows.pop()!
+      const all = [...prev.idx, ...cur]
+      const as = all.map(i => clampAspect(aspects[i]))
+      let best: { k: number; cost: number; h1: number; h2: number } | null = null
+      for (let k = 1; k < all.length; k++) {
+        const s1 = as.slice(0, k).reduce((x, y) => x + y, 0)
+        const s2 = as.slice(k).reduce((x, y) => x + y, 0)
+        const h1 = hOf(s1, k), h2 = hOf(s2, all.length - k)
+        const cost = Math.abs(h1 - T) + Math.abs(h2 - T)
+        if (!best || cost < best.cost) best = { k, cost, h1, h2 }
+      }
+      const sumAll = as.reduce((x, y) => x + y, 0)
+      const hAll = hOf(sumAll, all.length)
+      const twoOk = best && Math.max(best.h1, best.h2) <= T * 1.6 && Math.min(best.h1, best.h2) >= T * 0.6
+      const oneOk = hAll >= T * 0.6
+      if (oneOk && (!twoOk || Math.abs(hAll - T) <= best!.cost / 2)) {
+        rows.push({ idx: all, h: hAll, partial: false })
+      } else if (twoOk) {
+        rows.push({ idx: all.slice(0, best!.k), h: best!.h1, partial: false }, { idx: all.slice(best!.k), h: best!.h2, partial: false })
+      } else {
+        rows.push(prev, { idx: cur, h: T, partial: true })
+      }
+    } else rows.push({ idx: cur, h: Math.min(T, h), partial: true })
+  }
+  return rows
+}
+
+export function Justified<T>({ items, aspect, render, keyOf }: {
+  items: T[]; aspect: (t: T) => number; render: (t: T) => ReactNode; keyOf: (t: T) => string | number
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [w, setW] = useState(0)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const calc = () => setW(el.clientWidth)
+    calc()
+    const ro = new ResizeObserver(calc)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const T = targetHeight(w)
+  const rows = w > 0 ? layoutRows(items.map(aspect), w, T) : []
+  return (
+    <div ref={ref} className="jgrid">
+      {rows.map((r, ri) => (
+        <div key={ri} className={`jrow ${r.partial ? 'is-partial' : ''}`} style={{ height: Math.round(r.h) }}>
+          {r.idx.map(i => {
+            const a = clampAspect(aspect(items[i]))
+            return (
+              <div key={keyOf(items[i])} className="jcell" style={r.partial ? { flex: `0 0 ${Math.round(a * r.h)}px` } : { flex: `${a} 1 0` }}>
+                {render(items[i])}
+              </div>
+            )
+          })}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function ImageTile({ img, onOpen, actions, selected, onSelect }: {
   img: Img; onOpen: () => void; actions: ReturnType<typeof useImageActions>
   selected?: boolean; onSelect?: () => void
 }) {
   const [loaded, setLoaded] = useState(false)
   return (
-    <figure className={`tile ${selected ? 'is-selected' : ''} ${onSelect ? 'is-selecting' : ''}`} style={{ aspectRatio: `${img.width || 1} / ${img.height || 1}` }}>
-      <img src={img.thumb} alt="" loading="lazy" decoding="async" className={loaded ? 'is-loaded' : ''} onLoad={() => setLoaded(true)}
-        onClick={onSelect || onOpen} draggable={false} />
-      {onSelect && <button className="tile-check" onClick={onSelect} aria-label="选择">{selected && <Check size={14} strokeWidth={3} />}</button>}
+    <figure className={`tile ${selected ? 'is-selected' : ''} ${onSelect ? 'is-selecting' : ''} ${img.favorite ? 'is-fav' : ''}`}>
+      <img src={img.thumb} alt="" loading="lazy" decoding="async" className={loaded ? 'is-loaded' : ''} onLoad={() => setLoaded(true)} draggable={false} />
+      <button className="tile-hit" onClick={onSelect || onOpen} aria-label={onSelect ? '选择' : '查看'} />
+      {onSelect && <span className="tile-check">{selected && <Check size={14} strokeWidth={3} />}</span>}
       {!onSelect && (
         <>
-          <div className="tile-shade" onClick={onOpen} />
-          <button className={`tile-fav ${img.favorite ? 'is-on' : ''}`} onClick={() => actions.fav(img)} aria-label={img.favorite ? '取消收藏' : '收藏'} title={img.favorite ? '取消收藏' : '收藏'}>
+          <button className="tile-fav" onClick={() => actions.fav(img)} aria-label={img.favorite ? '取消收藏' : '收藏'} title={img.favorite ? '取消收藏' : '收藏'}>
             <Heart size={16} fill={img.favorite ? 'currentColor' : 'none'} />
           </button>
-          <figcaption className="tile-bar">
+          <div className="tile-bar">
             <span className="tile-meta">{img.width}×{img.height}</span>
             <span className="tile-actions">
-              <a className="tile-btn" href={`/api/images/${img.id}/download`} title="下载" aria-label="下载"><Download size={15} /></a>
-              <button className="tile-btn" onClick={() => actions.copy(img)} title="复制配方" aria-label="复制配方"><Copy size={15} /></button>
-              <button className="tile-btn" onClick={() => actions.reuse(img)} title="用这个配方再来" aria-label="用这个配方再来"><RotateCcw size={15} /></button>
-              <button className="tile-btn danger" onClick={() => actions.remove(img)} title="删除" aria-label="删除"><Trash2 size={15} /></button>
+              <a className="tile-btn" href={`/api/images/${img.id}/download`} title="下载" aria-label="下载"><Download size={16} /></a>
+              <button className="tile-btn" onClick={() => actions.reuse(img)} title="再来一张" aria-label="再来一张"><RotateCcw size={16} /></button>
+              <button className="tile-btn" onClick={() => actions.remove(img)} title="删除" aria-label="删除"><Trash2 size={16} /></button>
             </span>
-          </figcaption>
+          </div>
         </>
       )}
     </figure>
@@ -104,16 +197,17 @@ export function Lightbox({ list, index, onIndex, onClose, actions, onChange, alb
     <div className="lb" role="dialog" aria-modal="true">
       <div className="lb-stage" onClick={e => e.target === e.currentTarget && onClose()}>
         <img key={img.id} src={img.url} alt="" className="lb-img" />
-        {index > 0 && <button className="lb-nav prev" onClick={() => onIndex(index - 1)} aria-label="上一张"><ChevronLeft size={22} /></button>}
-        {index < list.length - 1 && <button className="lb-nav next" onClick={() => onIndex(index + 1)} aria-label="下一张"><ChevronRight size={22} /></button>}
+        {index > 0 && <button className="lb-nav prev" onClick={() => onIndex(index - 1)} aria-label="上一张"><ChevronLeft size={20} /></button>}
+        {index < list.length - 1 && <button className="lb-nav next" onClick={() => onIndex(index + 1)} aria-label="下一张"><ChevronRight size={20} /></button>}
         <div className="lb-count">{index + 1} / {list.length}</div>
+        <button className="lb-close" onClick={onClose} aria-label="关闭"><X size={20} /></button>
       </div>
       <aside className="lb-side">
         <div className="lb-head">
-          <button className={`btn ${img.favorite ? 'btn-accent' : 'btn-ghost'}`} onClick={() => actions.fav(img)}>
-            <Heart size={15} fill={img.favorite ? 'currentColor' : 'none'} />{img.favorite ? '已收藏' : '收藏'}
+          <span className="lb-title">配方</span>
+          <button className={`btn btn-sm ${img.favorite ? 'btn-primary' : 'btn-secondary'}`} onClick={() => actions.fav(img)}>
+            <Heart size={14} fill={img.favorite ? 'currentColor' : 'none'} />{img.favorite ? '已收藏' : '收藏'}
           </button>
-          <button className="icon-btn" onClick={onClose} aria-label="关闭"><X size={20} /></button>
         </div>
         <div className="lb-scroll">
           <section className="lb-sec">
@@ -126,41 +220,43 @@ export function Lightbox({ list, index, onIndex, onClose, actions, onChange, alb
               <p className="lb-prompt is-sent">{r.sent_prompt}</p>
             </section>
           )}
-          <dl className="lb-grid">
-            <dt>渠道</dt><dd>{r.channel_name || '—'}</dd>
-            <dt>接口</dt><dd>{apiTypeLabels[r.api_type] || '—'}{r.ref_count ? ` · 参考图 ${r.ref_count} 张` : ''}</dd>
-            <dt>模型</dt><dd className="mono">{r.model}</dd>
-            {params.map(p => <FragmentRow key={p.k} k={p.k} v={p.v} />)}
-            <dt>实际尺寸</dt><dd className="mono">{img.width}×{img.height}<span className="muted"> · {ratioOf(img.width, img.height)}</span></dd>
-            <dt>文件</dt><dd className="mono">{img.format.toUpperCase()} · {fmtBytes(img.bytes)}</dd>
-            <dt>耗时</dt><dd className="mono">{fmtDuration(r.duration_ms)}</dd>
-            <dt>时间</dt><dd>{fmtTime(img.created_at)}</dd>
-            {r.tool_path && <><dt>链路</dt><dd>对话工具链路</dd></>}
-          </dl>
+          <section className="lb-sec">
+            <dl className="kv">
+              <dt>渠道</dt><dd>{r.channel_name || '—'}</dd>
+              <dt>接口</dt><dd>{apiTypeLabels[r.api_type] || '—'}{r.ref_count ? ` · 参考图 ${r.ref_count} 张` : ''}</dd>
+              <dt>模型</dt><dd>{r.model}</dd>
+              {params.map(p => <KV key={p.k} k={p.k} v={p.v} />)}
+              <dt>实际尺寸</dt><dd>{img.width}×{img.height} · {ratioOf(img.width, img.height)}</dd>
+              <dt>文件</dt><dd>{img.format.toUpperCase()} · {fmtBytes(img.bytes)}</dd>
+              <dt>耗时</dt><dd>{fmtDuration(r.duration_ms)}</dd>
+              <dt>时间</dt><dd>{fmtTime(img.created_at)}</dd>
+              {r.tool_path && <><dt>链路</dt><dd>对话工具链路</dd></>}
+            </dl>
+          </section>
           {img.favorite && (
             <section className="lb-sec">
               <div className="lb-label">相册</div>
               <div className="lb-album">
-                <FolderOpen size={15} />
+                <FolderOpen size={16} />
                 <input list="album-list" value={album} placeholder="未归档" onChange={e => setAlbum(e.target.value)}
                   onBlur={() => album !== img.album && save({ album })} onKeyDown={e => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
                 <datalist id="album-list">{albums.map(a => <option key={a} value={a} />)}</datalist>
               </div>
-              <div className="lb-label" style={{ marginTop: 14 }}>标签</div>
+              <div className="lb-label">标签</div>
               <TagInput value={img.tags} onChange={tags => save({ tags })} placeholder="添加标签" />
             </section>
           )}
         </div>
         <div className="lb-actions">
-          <a className="btn btn-ghost" href={`/api/images/${img.id}/download`}><Download size={15} />下载原图</a>
-          <button className="btn btn-ghost" onClick={() => actions.copy(img)}><Copy size={15} />复制配方</button>
-          <button className="btn btn-ghost" onClick={() => { actions.reuse(img); onClose() }}><RotateCcw size={15} />再来一张</button>
-          <button className="btn btn-ghost danger" onClick={async () => { await actions.remove(img); if (list.length <= 1) onClose() }}><Trash2 size={15} />删除</button>
+          <a className="btn btn-secondary" href={`/api/images/${img.id}/download`}><Download size={16} />下载原图</a>
+          <button className="btn btn-secondary" onClick={() => actions.copy(img)}><Copy size={16} />复制配方</button>
+          <button className="btn btn-secondary" onClick={() => { actions.reuse(img); onClose() }}><RotateCcw size={16} />再来一张</button>
+          <button className="btn btn-secondary is-danger" onClick={async () => { await actions.remove(img); if (list.length <= 1) onClose() }}><Trash2 size={16} />删除</button>
         </div>
       </aside>
     </div>, document.body)
 }
 
-function FragmentRow({ k, v }: { k: string; v: string }) {
+function KV({ k, v }: { k: string; v: string }) {
   return <><dt>{k}</dt><dd>{v}</dd></>
 }

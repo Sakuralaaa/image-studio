@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import { Search, CheckSquare, PackageOpen, X, FolderOpen } from 'lucide-react'
 import { api, downloadPost, type Facet, type Img } from '../api'
 import { useStore } from '../store'
-import { Empty, Masonry, Select, Spinner } from '../components/ui'
-import { ImageTile, Lightbox, useImageActions } from '../components/gallery'
+import { Empty, Select, Spinner } from '../components/ui'
+import { ImageTile, Justified, Lightbox, useImageActions } from '../components/gallery'
 import { useImages, useSentinel } from '../components/useImages'
-import { PageHead } from './Generate'
+import { PageHead } from './Compare'
 import { fmtBytes } from '../labels'
 
 interface Facets { albums: Facet[]; tags: Facet[]; channels: Facet[]; models: Facet[]; favorites: number; total: number; bytes: number }
@@ -44,26 +44,24 @@ export default function Assets() {
 
   return (
     <div className="page page-assets">
-      <PageHead title="资产">
-        {facets && <span className="head-stat">{facets.favorites} 张 · {fmtBytes(facets.bytes)}</span>}
-      </PageHead>
+      <PageHead title="资产" sub={facets ? `${facets.favorites} 张 · ${fmtBytes(facets.bytes)}` : undefined} />
 
       <div className="toolbar">
-        <div className="search grow"><Search size={15} /><input value={q} onChange={e => setQ(e.target.value)} placeholder="搜索提示词、标签、渠道或模型" /></div>
+        <div className="search"><Search size={16} /><input value={q} onChange={e => setQ(e.target.value)} placeholder="搜索提示词、标签、渠道或模型" /></div>
         {facets && facets.channels.length > 1 && <Select className="filter-sel" value={channel} placeholder="全部渠道" onChange={setChannel} options={[{ value: '', label: '全部渠道' }, ...facets.channels.map(f => ({ value: f.name, label: f.name, hint: String(f.count) }))]} />}
         {facets && facets.models.length > 1 && <Select className="filter-sel" value={model} placeholder="全部模型" onChange={setModel} options={[{ value: '', label: '全部模型' }, ...facets.models.map(f => ({ value: f.name, label: f.name, hint: String(f.count) }))]} />}
-        <button className={`btn ${selecting ? 'btn-ink' : 'btn-ghost'}`} onClick={() => { setSelecting(s => !s); setSel([]) }}>
-          {selecting ? <X size={15} /> : <CheckSquare size={15} />}<span className="hide-sm">{selecting ? '取消选择' : '批量选择'}</span>
+        <button className={`btn ${selecting ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setSelecting(s => !s); setSel([]) }}>
+          {selecting ? <X size={16} /> : <CheckSquare size={16} />}<span className="hide-xs">{selecting ? '取消选择' : '批量选择'}</span>
         </button>
-        <button className="btn btn-ghost" onClick={exportZip}><PackageOpen size={15} /><span className="hide-sm">{selecting ? `导出所选${sel.length ? ` ${sel.length}` : ''}` : '全部导出'}</span></button>
+        <button className="btn btn-secondary" onClick={exportZip}><PackageOpen size={16} /><span className="hide-xs">{selecting ? `导出所选${sel.length ? ` ${sel.length}` : ''}` : '全部导出'}</span></button>
       </div>
 
       {facets && (facets.albums.length > 0 || facets.tags.length > 0) && (
         <div className="albums">
-          <button className={`album ${!album ? 'is-on' : ''}`} onClick={() => setAlbum('')}><span>全部</span><em>{facets.favorites}</em></button>
+          <button className={`chip ${!album ? 'is-on' : ''}`} onClick={() => setAlbum('')}><span>全部</span><em>{facets.favorites}</em></button>
           {facets.albums.map(a => (
-            <button key={a.name} className={`album ${album === a.name ? 'is-on' : ''}`} onClick={() => setAlbum(album === a.name ? '' : a.name)}>
-              <FolderOpen size={14} /><span>{a.name}</span><em>{a.count}</em>
+            <button key={a.name} className={`chip ${album === a.name ? 'is-on' : ''}`} onClick={() => setAlbum(album === a.name ? '' : a.name)}>
+              <FolderOpen size={16} /><span>{a.name}</span><em>{a.count}</em>
             </button>
           ))}
           {facets.tags.length > 0 && <span className="albums-sep" />}
@@ -74,9 +72,9 @@ export default function Assets() {
       )}
 
       {g.loaded && g.images.length === 0 ? (
-        <Empty art="stack" title={filtered ? '没有匹配的资产' : '还没有资产'} text={filtered ? undefined : '在任意图片上点心形，就会永久收进这里'} />
+        <Empty art="stack" title={filtered ? '没有匹配的资产' : '还没有资产'}  />
       ) : (
-        <Masonry items={g.images} keyOf={i => i.id} aspect={i => (i.width || 1) / (i.height || 1)}
+        <Justified items={g.images} keyOf={i => i.id} aspect={i => (i.width || 1) / (i.height || 1)}
           render={(img: Img) => <ImageTile img={img} actions={actions} onOpen={() => setLb(g.images.findIndex(x => x.id === img.id))}
             selected={sel.includes(img.id)} onSelect={selecting ? () => toggle(img.id) : undefined} />} />
       )}

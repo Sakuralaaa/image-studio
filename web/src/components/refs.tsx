@@ -5,10 +5,10 @@ import type { RefImg } from '../store'
 import { useStore } from '../store'
 import { Spinner } from './ui'
 
-export function RefDrop({ refs, onChange, max }: { refs: RefImg[]; onChange: (r: RefImg[]) => void; max: number }) {
+/** 参考图上传：拖拽、粘贴、选择文件 */
+export function useRefUpload(refs: RefImg[], onChange: (r: RefImg[]) => void, max: number, pasteEnabled = true) {
   const { toast } = useStore()
-  const input = useRef<HTMLInputElement>(null)
-  const [over, setOver] = useState(false)
+  const input = useRef<HTMLInputElement | null>(null)
   const [busy, setBusy] = useState(0)
   const refsRef = useRef(refs)
   refsRef.current = refs
@@ -16,6 +16,7 @@ export function RefDrop({ refs, onChange, max }: { refs: RefImg[]; onChange: (r:
   const add = async (files: File[]) => {
     const imgs = files.filter(f => f.type.startsWith('image/'))
     if (!imgs.length) return
+    if (max <= 0) { toast('当前渠道不支持参考图', 'info'); return }
     const room = max - refsRef.current.length
     if (room <= 0) { toast(`当前渠道最多 ${max} 张参考图`, 'info'); return }
     const take = imgs.slice(0, room)
@@ -32,6 +33,7 @@ export function RefDrop({ refs, onChange, max }: { refs: RefImg[]; onChange: (r:
   }
 
   useEffect(() => {
+    if (!pasteEnabled) return
     const paste = (e: ClipboardEvent) => {
       const files = Array.from(e.clipboardData?.files || [])
       if (files.some(f => f.type.startsWith('image/'))) { e.preventDefault(); add(files) }
@@ -40,12 +42,13 @@ export function RefDrop({ refs, onChange, max }: { refs: RefImg[]; onChange: (r:
     return () => window.removeEventListener('paste', paste)
   })
 
-  const disabled = max <= 0
+  const fileInput = <input ref={input} type="file" accept="image/*" multiple hidden onChange={e => { add(Array.from(e.target.files || [])); e.target.value = '' }} />
+  return { add, busy, pick: () => input.current?.click(), fileInput }
+}
+
+export function RefThumbs({ refs, busy, onChange }: { refs: RefImg[]; busy: number; onChange: (r: RefImg[]) => void }) {
   return (
-    <div className={`refs ${over ? 'is-over' : ''} ${disabled ? 'is-disabled' : ''}`}
-      onDragOver={e => { if (disabled) return; e.preventDefault(); setOver(true) }}
-      onDragLeave={() => setOver(false)}
-      onDrop={e => { e.preventDefault(); setOver(false); if (!disabled) add(Array.from(e.dataTransfer.files)) }}>
+    <>
       {refs.map(r => (
         <div className="ref" key={r.id}>
           <img src={r.url} alt="" />
@@ -53,15 +56,25 @@ export function RefDrop({ refs, onChange, max }: { refs: RefImg[]; onChange: (r:
         </div>
       ))}
       {Array.from({ length: busy }).map((_, i) => <div className="ref is-busy" key={'b' + i}><Spinner /></div>)}
-      {!disabled && refs.length + busy < max && (
-        <button type="button" className="ref-add" onClick={() => input.current?.click()}>
-          <ImagePlus size={18} />
-          <span>{refs.length ? '继续添加' : '参考图'}</span>
-          <em>{refs.length}/{max}</em>
-        </button>
+    </>
+  )
+}
+
+/** 对比页用的参考图行 */
+export function RefDrop({ refs, onChange, max }: { refs: RefImg[]; onChange: (r: RefImg[]) => void; max: number }) {
+  const up = useRefUpload(refs, onChange, max, false)
+  const [over, setOver] = useState(false)
+  const disabled = max <= 0
+  return (
+    <div className={`refs ${over ? 'is-over' : ''}`}
+      onDragOver={e => { if (disabled) return; e.preventDefault(); setOver(true) }}
+      onDragLeave={() => setOver(false)}
+      onDrop={e => { e.preventDefault(); setOver(false); if (!disabled) up.add(Array.from(e.dataTransfer.files)) }}>
+      <RefThumbs refs={refs} busy={up.busy} onChange={onChange} />
+      {refs.length + up.busy < max && (
+        <button type="button" className="btn btn-secondary btn-sm" onClick={up.pick}><ImagePlus size={16} />参考图<span className="btn-count">{refs.length}/{max}</span></button>
       )}
-      {disabled && <div className="ref-off"><ImagePlus size={16} />当前渠道不支持参考图</div>}
-      <input ref={input} type="file" accept="image/*" multiple hidden onChange={e => { add(Array.from(e.target.files || [])); e.target.value = '' }} />
+      {up.fileInput}
     </div>
   )
 }

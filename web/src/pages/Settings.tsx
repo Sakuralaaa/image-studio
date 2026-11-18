@@ -3,7 +3,7 @@ import { Plus, Pencil, Trash2, Plug, RefreshCw, Check, Search, Route as RouteIco
 import { api, type Cap, type Caps, type Channel, type Preset } from '../api'
 import { useStore, type ThemePref } from '../store'
 import { Empty, Modal, Segmented, Select, Spinner, TagInput } from '../components/ui'
-import { PageHead } from './Generate'
+import { PageHead } from './Compare'
 import { apiTypeLabels, capLabels, fmtBytes, modeLabels, valueLabel } from '../labels'
 
 export default function Settings() {
@@ -11,7 +11,7 @@ export default function Settings() {
   return (
     <div className="page page-settings">
       <PageHead title="设置">
-        <Segmented value={tab} onChange={v => setTab(v as any)} options={[{ value: 'channels', label: '渠道' }, { value: 'general', label: '通用' }]} />
+        <Segmented block={false} value={tab} onChange={v => setTab(v as any)} options={[{ value: 'channels', label: '渠道' }, { value: 'general', label: '通用' }]} />
       </PageHead>
       {tab === 'channels' ? <Channels /> : <General />}
     </div>
@@ -38,10 +38,10 @@ function Channels() {
   return (
     <div className="channels">
       <div className="toolbar">
-        <span className="grow toolbar-title">{channels.length} 个渠道</span>
-        <button className="btn btn-accent" onClick={() => setEdit({})}><Plus size={15} />新建渠道</button>
+        <span className="toolbar-title">{channels.length} 个渠道</span><span className="grow" />
+        <button className="btn btn-primary" onClick={() => setEdit({})}><Plus size={16} />新建渠道</button>
       </div>
-      {channels.length === 0 && <div className="card onboarding"><Empty art="plug" title="还没有渠道" action={<button className="btn btn-accent" onClick={() => setEdit({})}><Plus size={15} />新建渠道</button>} /></div>}
+      {channels.length === 0 && <div className="card card-empty"><Empty art="plug" title="还没有渠道" action={<button className="btn btn-primary" onClick={() => setEdit({})}><Plus size={16} />新建渠道</button>} /></div>}
       <div className="ch-list">
         {channels.map((c, i) => (
           <article key={c.id} className="card ch">
@@ -50,14 +50,14 @@ function Channels() {
                 <span className="ch-mark">{c.name.slice(0, 1)}</span>
                 <div className="ch-name">
                   <h3>{c.name}</h3>
-                  <span className="ch-url mono">{c.base_url}</span>
+                  <span className="ch-url">{c.base_url}</span>
                 </div>
               </div>
               <div className="ch-tags">
                 <span className="mini-tag">{apiTypeLabels[c.api_type]}</span>
                 <span className="mini-tag">{c.models.length} 个模型</span>
-                {c.key_tail && <span className="mini-tag mono"><KeyRound size={11} />{c.key_tail}</span>}
-                {c.tool_path_at > 0 && <span className="mini-tag is-warn"><RouteIcon size={11} />对话工具链路</span>}
+                {c.key_tail && <span className="mini-tag"><KeyRound size={12} />{c.key_tail}</span>}
+                {c.tool_path_at > 0 && <span className="mini-tag is-warn"><RouteIcon size={12} />对话工具链路</span>}
               </div>
               <CapSummary caps={c.caps} />
             </div>
@@ -65,7 +65,7 @@ function Channels() {
               <button className="icon-btn sm" onClick={() => move(i, -1)} disabled={i === 0} aria-label="上移"><ArrowUp size={14} /></button>
               <button className="icon-btn sm" onClick={() => move(i, 1)} disabled={i === channels.length - 1} aria-label="下移"><ArrowDown size={14} /></button>
               <button className="icon-btn sm" onClick={() => setEdit(c)} aria-label="编辑"><Pencil size={14} /></button>
-              <button className="icon-btn sm danger" onClick={() => del(c)} aria-label="删除"><Trash2 size={14} /></button>
+              <button className="icon-btn sm is-danger" onClick={() => del(c)} aria-label="删除"><Trash2 size={14} /></button>
             </div>
           </article>
         ))}
@@ -146,7 +146,7 @@ function ChannelEditor({ initial, onClose, onSaved }: { initial: Partial<Channel
   const shownModels = allModels.filter(m => !mq || m.toLowerCase().includes(mq.toLowerCase()))
 
   const save = async () => {
-    if (!ch.name?.trim() || !ch.base_url?.trim()) { toast('名称和 Base URL 不能为空', 'info'); return }
+    if (!ch.name?.trim() || !ch.base_url?.trim()) { toast('名称和接口地址不能为空', 'info'); return }
     setSaving(true)
     try {
       await api(isNew ? '/api/channels' : `/api/channels/${initial.id}`, { method: isNew ? 'POST' : 'PUT', body: ch })
@@ -157,7 +157,7 @@ function ChannelEditor({ initial, onClose, onSaved }: { initial: Partial<Channel
 
   return (
     <Modal open onClose={onClose} wide title={isNew ? '新建渠道' : '编辑渠道'} className="ch-editor"
-      footer={<><button className="btn btn-ghost" onClick={onClose}>取消</button><button className="btn btn-accent" onClick={save} disabled={saving}>{saving && <Spinner />}保存</button></>}>
+      footer={<><button className="btn btn-secondary" onClick={onClose}>取消</button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving && <Spinner />}保存</button></>}>
       {isNew && presets.length > 0 && (
         <div className="field">
           <span className="field-label">快速填充</span>
@@ -171,9 +171,9 @@ function ChannelEditor({ initial, onClose, onSaved }: { initial: Partial<Channel
         <div className="field"><span className="field-label">接口类型</span>
           <Segmented value={ch.api_type || 'images'} onChange={v => setCh({ ...ch, api_type: v as any })} options={[{ value: 'images', label: apiTypeLabels.images }, { value: 'chat', label: apiTypeLabels.chat }]} />
         </div>
-        <label className="field span-2"><span className="field-label">Base URL</span><input className="input mono" value={ch.base_url || ''} onChange={e => setCh({ ...ch, base_url: e.target.value })} placeholder="https://example.com/v1" /></label>
-        <label className="field span-2"><span className="field-label">API Key</span>
-          <input className="input mono" type="password" autoComplete="new-password" value={ch.api_key || ''} onChange={e => setCh({ ...ch, api_key: e.target.value })} placeholder={initial.key_tail ? `已保存 ${initial.key_tail}，留空不修改` : 'sk-…'} />
+        <label className="field span-2"><span className="field-label">接口地址</span><input className="input" value={ch.base_url || ''} onChange={e => setCh({ ...ch, base_url: e.target.value })} placeholder="https://example.com/v1" /></label>
+        <label className="field span-2"><span className="field-label">密钥</span>
+          <input className="input" type="password" autoComplete="new-password" value={ch.api_key || ''} onChange={e => setCh({ ...ch, api_key: e.target.value })} placeholder={initial.key_tail ? `已保存 ${initial.key_tail}，留空不修改` : 'sk-…'} />
         </label>
       </div>
 
@@ -182,22 +182,22 @@ function ChannelEditor({ initial, onClose, onSaved }: { initial: Partial<Channel
           <span className="field-label">模型</span>
           <span className="grow" />
           {probe.msg && <span className={`probe ${probe.ok ? 'ok' : 'err'}`}>{probe.ok ? <Check size={13} /> : <X size={13} />}{probe.msg}</span>}
-          <button className="btn btn-ghost sm" onClick={doProbe} disabled={probe.busy || !ch.base_url}>{probe.busy ? <Spinner size={13} /> : <RefreshCw size={13} />}测试连接并拉取</button>
+          <button className="btn btn-secondary btn-sm" onClick={doProbe} disabled={probe.busy || !ch.base_url}>{probe.busy ? <Spinner size={13} /> : <RefreshCw size={13} />}测试连接并拉取</button>
         </div>
         <div className="models">
           {allModels.length > 8 && <div className="search sm"><Search size={14} /><input value={mq} onChange={e => setMq(e.target.value)} placeholder="筛选模型" /></div>}
           <div className="model-list">
             {shownModels.map(m => (
               <button key={m} className={`model ${ch.models?.includes(m) ? 'is-on' : ''}`} onClick={() => toggleModel(m)}>
-                <span className="cbox">{ch.models?.includes(m) && <Check size={11} strokeWidth={3} />}</span><span className="mono">{m}</span>
+                <span className="cbox">{ch.models?.includes(m) && <Check size={11} strokeWidth={3} />}</span><span >{m}</span>
               </button>
             ))}
             {allModels.length === 0 && <span className="muted sm-text">暂无模型</span>}
           </div>
           <div className="model-add">
-            <input className="input mono" value={manual} onChange={e => setManual(e.target.value)} placeholder="手动添加模型名"
+            <input className="input" value={manual} onChange={e => setManual(e.target.value)} placeholder="手动添加模型名"
               onKeyDown={e => { if (e.key === 'Enter' && manual.trim()) { const m = manual.trim(); setCh(c => ({ ...c, models: Array.from(new Set([...(c.models || []), m])) })); setManual('') } }} />
-            <button className="btn btn-ghost sm" onClick={() => { const m = manual.trim(); if (m) { setCh(c => ({ ...c, models: Array.from(new Set([...(c.models || []), m])) })); setManual('') } }}><Plus size={13} />添加</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => { const m = manual.trim(); if (m) { setCh(c => ({ ...c, models: Array.from(new Set([...(c.models || []), m])) })); setManual('') } }}><Plus size={13} />添加</button>
           </div>
         </div>
       </div>
@@ -219,13 +219,13 @@ function ChannelEditor({ initial, onClose, onSaved }: { initial: Partial<Channel
                     <div className="cap-values">
                       <TagInput value={cap.values || []} onChange={values => setCap(k, { values, default: values.includes(cap.default || '') ? cap.default : values[0] })} placeholder="可选值" />
                       {(cap.values || []).length > 1 && (
-                        <Select className="cap-default" value={cap.default || cap.values![0]} onChange={v => setCap(k, { default: v })}
+                        <Select size="sm" className="cap-default" value={cap.default || cap.values![0]} onChange={v => setCap(k, { default: v })}
                           options={(cap.values || []).map(v => ({ value: v, label: '默认 ' + valueLabel(k, v) }))} />
                       )}
                     </div>
                   )}
                   {!off && (k === 'n' || k === 'refs') && (
-                    <label className="cap-max"><span>上限</span><input className="input mono" type="number" min={k === 'n' ? 1 : 0} max={16} value={cap.max ?? 0} onChange={e => setCap(k, { max: Number(e.target.value) })} /></label>
+                    <label className="cap-max"><span>上限</span><input className="input" type="number" min={k === 'n' ? 1 : 0} max={16} value={cap.max ?? 0} onChange={e => setCap(k, { max: Number(e.target.value) })} /></label>
                   )}
                   {!off && k === 'response' && (
                     <Segmented size="sm" value={cap.values?.[0] || 'url'} onChange={v => setCap(k, { values: [v] })} options={[{ value: 'url', label: '链接' }, { value: 'b64_json', label: '内嵌数据' }]} />
@@ -270,11 +270,11 @@ function General() {
         <h3>历史清理</h3>
         <div className="g-row">
           <span>未收藏的历史图片保留</span>
-          <div className="num-input"><input className="input mono" type="number" min={0} value={days} onChange={e => setDays(e.target.value)} /><span>天</span></div>
+          <div className="num-input"><input className="input" type="number" min={0} value={days} onChange={e => setDays(e.target.value)} /><span>天</span></div>
           {Number(days) <= 0 && <span className="muted">当前不清理</span>}
           <span className="grow" />
-          <button className="btn btn-ghost" onClick={() => save(false)}>保存</button>
-          {Number(days) > 0 && <button className="btn btn-ghost" onClick={() => save(true)}>立即清理</button>}
+          <button className="btn btn-secondary" onClick={() => save(false)}>保存</button>
+          {Number(days) > 0 && <button className="btn btn-secondary" onClick={() => save(true)}>立即清理</button>}
         </div>
         {s && (
           <div className="stats">
@@ -289,7 +289,7 @@ function General() {
         <div className="g-row">
           <span className="muted">版本 {s?.version || ''}</span>
           <span className="grow" />
-          <button className="btn btn-ghost" onClick={logout}><LogOut size={15} />退出登录</button>
+          <button className="btn btn-secondary" onClick={logout}><LogOut size={16} />退出登录</button>
         </div>
       </section>
     </div>

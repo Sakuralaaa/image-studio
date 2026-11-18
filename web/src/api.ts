@@ -77,3 +77,15 @@ export function downloadPost(path: string, payload: any) {
   form.submit()
   setTimeout(() => form.remove(), 1000)
 }
+
+export interface MarketL10n { title: string; prompt: string; category: string; sub_category?: string }
+export interface MarketPrompt {
+  id: string; title: string; preview: string; ref_urls: string[] | null; prompt: string; author: string
+  link?: string; mode: 'generate' | 'edit'; category: string; sub_category?: string; created?: string
+  source: string; nsfw: boolean; l10n?: Record<string, MarketL10n>
+}
+export interface MarketState {
+  items: MarketPrompt[]; fetched_at: number; error: string
+  sources: { id: string; label: string; url: string }[]
+}
+export const marketImg = (u: string) => '/api/market/img?u=' + encodeURIComponent(u)

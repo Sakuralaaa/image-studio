@@ -2,8 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, type Channel, type Params } from './api'
 import { fillVars } from './data/snippets'
 
-export type Route = 'generate' | 'compare' | 'prompts' | 'assets' | 'settings'
-export const routePaths: Record<Route, string> = { generate: '/', compare: '/compare', prompts: '/prompts', assets: '/assets', settings: '/settings' }
+export type Route = 'generate' | 'compare' | 'assets' | 'settings'
+export const routePaths: Record<Route, string> = { generate: '/', compare: '/compare', assets: '/assets', settings: '/settings' }
 function routeFromPath(p: string): Route {
   const hit = (Object.keys(routePaths) as Route[]).find(r => routePaths[r] === p)
   return hit || 'generate'
@@ -30,7 +30,10 @@ interface Store {
   toasts: Toast[]
   theme: ThemePref; setTheme: (t: ThemePref) => void
   galleryTick: number; bumpGallery: () => void
+  market: MarketOpen | null; openMarket: (m?: MarketOpen) => void; closeMarket: () => void
+  genView: 'hero' | 'gallery'; setGenView: (v: 'hero' | 'gallery') => void
 }
+export interface MarketOpen { tab?: 'market' | 'favs' | 'mine' | 'snip'; target?: 'generate' | 'compare' }
 
 const Ctx = createContext<Store>(null as any)
 export const useStore = () => useContext(Ctx)
@@ -47,7 +50,7 @@ export function applyTheme(t: ThemePref) {
   const dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
   document.documentElement.dataset.theme = dark ? 'dark' : 'light'
   const meta = document.querySelectorAll('meta[name="theme-color"]')
-  meta.forEach(m => m.setAttribute('content', dark ? '#0F0F0E' : '#F3F0E8'))
+  meta.forEach(m => m.setAttribute('content', dark ? '#0E0F0F' : '#F4F5F1'))
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -58,6 +61,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [theme, setThemeState] = useState<ThemePref>(() => (localStorage.getItem('studio.theme') as ThemePref) || 'system')
   const [galleryTick, setTick] = useState(0)
+  const [market, setMarket] = useState<MarketOpen | null>(null)
+  const [genView, setGenViewState] = useState<'hero' | 'gallery'>(() => (sessionStorage.getItem('studio.genview') as any) || 'hero')
+  const setGenView = useCallback((v: 'hero' | 'gallery') => { sessionStorage.setItem('studio.genview', v); setGenViewState(v) }, [])
+  const openMarket = useCallback((m: MarketOpen = {}) => setMarket(m), [])
+  const closeMarket = useCallback(() => setMarket(null), [])
   const tid = useRef(1)
 
   useEffect(() => {
@@ -125,7 +133,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const finalPrompt = useMemo(() => buildPrompt(composer), [composer])
   const bumpGallery = useCallback(() => setTick(x => x + 1), [])
 
-  const value: Store = { route, go, channels, reloadChannels, channelsLoaded, composer, setComposer, addChip, finalPrompt, toast, toasts, theme, setTheme, galleryTick, bumpGallery }
+  const value: Store = { route, go, channels, reloadChannels, channelsLoaded, composer, setComposer, addChip, finalPrompt, toast, toasts, theme, setTheme, galleryTick, bumpGallery, market, openMarket, closeMarket, genView, setGenView }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 
