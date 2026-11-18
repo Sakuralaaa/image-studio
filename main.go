@@ -21,7 +21,7 @@ import (
 var webFS embed.FS
 
 var (
-	version   = "0.4.3"
+	version   = "0.4.4"
 	dataDir   string
 	adminPass string
 	secret    []byte
@@ -121,6 +121,7 @@ func routes(m *http.ServeMux) {
 	a("DELETE /api/images/{id}", handleImageDelete)
 	a("POST /api/images/export", handleImageExport)
 	a("GET /api/images/{id}/download", handleImageDownload)
+	a("POST /api/images/{id}/ref", handleImageAsRef)
 	a("GET /api/facets", handleFacets)
 
 	a("GET /api/prompts", handlePromptList)

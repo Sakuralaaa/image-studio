@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Search, CheckSquare, PackageOpen, X, FolderOpen } from 'lucide-react'
+import { Search, CheckSquare, PackageOpen, X, FolderOpen, ImagePlus } from 'lucide-react'
 import { api, downloadPost, type Facet, type Img, type UserRow } from '../api'
 import { useStore } from '../store'
 import { Empty, Segmented, Select, Spinner } from '../components/ui'
@@ -72,6 +72,7 @@ export default function Assets() {
         <button className={`btn ${selecting ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setSelecting(s => !s); setSel([]) }}>
           {selecting ? <X size={16} /> : <CheckSquare size={16} />}<span className="hide-xs">{selecting ? '取消选择' : '批量选择'}</span>
         </button>
+        {selecting && <button className="btn btn-secondary" disabled={!sel.length} onClick={() => actions.asRef(sel.map(id => g.images.find(x => x.id === id)!).filter(Boolean))}><ImagePlus size={16} /><span className="hide-xs">作为参考图{sel.length ? ` ${sel.length}` : ''}</span></button>}
         <button className="btn btn-secondary" onClick={exportZip}><PackageOpen size={16} /><span className="hide-xs">{selecting ? `导出所选${sel.length ? ` ${sel.length}` : ''}` : '导出收藏'}</span></button>
       </div>
 
@@ -95,7 +96,7 @@ export default function Assets() {
       ) : (
         <Justified items={g.images} keyOf={i => i.id} aspect={i => (i.width || 1) / (i.height || 1)}
           render={(img: Img) => <ImageTile img={img} actions={actions} onOpen={() => setLb(g.images.findIndex(x => x.id === img.id))}
-            selected={sel.includes(img.id)} onSelect={selecting ? () => toggle(img.id) : undefined} />} />
+            selected={sel.includes(img.id)} onSelect={selecting ? () => toggle(img.id) : undefined} onLongPress={() => { setSelecting(true); setSel([img.id]) }} />} />
       )}
       <div ref={sentinel} className="sentinel">{g.loading && g.images.length > 0 && <Spinner />}</div>
 

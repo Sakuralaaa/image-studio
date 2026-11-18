@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type PointerEvent as RPointerEvent, type MouseEvent as RMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronLeft, ChevronRight, Copy, Download, Star, RotateCcw, Trash2, X, Check, FolderOpen, Clock } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Copy, Download, Star, RotateCcw, Trash2, X, Check, FolderOpen, Clock, ImagePlus } from 'lucide-react'
 import { api, type Img } from '../api'
 import { useStore } from '../store'
 import { apiTypeLabels, describeParams, fmtBytes, fmtDuration, fmtTime, ratioOf } from '../labels'
@@ -21,8 +21,26 @@ export function recipeText(img: Img) {
 }
 
 export function useImageActions(onChange: (img: Img) => void, onRemove: (id: number) => void) {
-  const { toast, setComposer, go, channels } = useStore()
+  const { toast, setComposer, go, channels, composer } = useStore()
   return {
+    // 把已生成的图加入输入框的参考图，可多选
+    async asRef(imgs: Img[]) {
+      const ch = channels.find(c => c.id === composer.channelId)
+      const max = ch ? (ch.caps.refs?.mode === 'off' ? 0 : ch.caps.refs?.max || 0) : 0
+      if (!max) { toast('当前模型不支持参考图，先在输入框里换一个支持的模型', 'info'); return }
+      const have = new Set(composer.refs.map(r => r.src).filter(Boolean))
+      const todo = imgs.filter(i => !have.has(i.id))
+      if (!todo.length) { toast('已经在参考图里了', 'info'); go('generate'); return }
+      const room = max - composer.refs.length
+      if (room <= 0) { toast(`当前模型最多 ${max} 张参考图`, 'info'); return }
+      const take = todo.slice(0, room)
+      try {
+        const got = await Promise.all(take.map(i => api<{ id: number; url: string }>(`/api/images/${i.id}/ref`, { method: 'POST' }).then(r => ({ ...r, src: i.id }))))
+        setComposer(c => ({ refs: [...c.refs, ...got].slice(0, max) }))
+        go('generate')
+        toast(todo.length > take.length ? `已加入 ${take.length} 张，当前模型最多 ${max} 张参考图` : `已加入 ${take.length} 张参考图`, todo.length > take.length ? 'info' : 'ok')
+      } catch (e: any) { toast(e.message, 'err') }
+    },
     async fav(img: Img) {
       const next = await api<Img>(`/api/images/${img.id}`, { method: 'PATCH', body: { favorite: !img.favorite } })
       onChange(next)
@@ -149,17 +167,43 @@ export function leftText(exp: number) {
   return `${Math.ceil(h / 24)} 天`
 }
 
-export function ImageTile({ img, onOpen, actions, selected, onSelect }: {
+// 长按（触屏/鼠标通用）：按住约 0.45 秒触发，移动超过 8px 取消；触发后吞掉随后的点击
+function useLongPress(fn?: () => void) {
+  const t = useRef<number>(0)
+  const start = useRef<[number, number]>([0, 0])
+  const fired = useRef(false)
+  const clear = () => { window.clearTimeout(t.current); t.current = 0 }
+  if (!fn) return { fired, handlers: {} }
+  return {
+    fired,
+    handlers: {
+      onPointerDown: (e: RPointerEvent) => {
+        if (e.button !== 0) return
+        fired.current = false; start.current = [e.clientX, e.clientY]; clear()
+        t.current = window.setTimeout(() => { fired.current = true; t.current = 0; navigator.vibrate?.(12); fn() }, 450)
+      },
+      onPointerMove: (e: RPointerEvent) => {
+        if (t.current && Math.hypot(e.clientX - start.current[0], e.clientY - start.current[1]) > 8) clear()
+      },
+      onPointerUp: clear, onPointerCancel: clear, onPointerLeave: clear,
+      onContextMenu: (e: RMouseEvent) => { if (fired.current || t.current) e.preventDefault() },
+    },
+  }
+}
+
+export function ImageTile({ img, onOpen, actions, selected, onSelect, onLongPress }: {
   img: Img; onOpen: () => void; actions: ReturnType<typeof useImageActions>
-  selected?: boolean; onSelect?: () => void
+  selected?: boolean; onSelect?: () => void; onLongPress?: () => void
 }) {
   const [loaded, setLoaded] = useState(false)
   const [full, setFull] = useState(false)
+  const lp = useLongPress(onSelect ? undefined : onLongPress)
+  const click = () => { if (lp.fired.current) { lp.fired.current = false; return } (onSelect || onOpen)() }
   return (
     <figure className={`tile ${selected ? 'is-selected' : ''} ${onSelect ? 'is-selecting' : ''} ${img.favorite ? 'is-fav' : ''}`}>
       <img src={img.thumb} alt="" loading="lazy" decoding="async" className={loaded ? 'is-loaded' : ''} onLoad={() => setLoaded(true)} draggable={false} />
       {loaded && <img src={img.url} alt="" loading="lazy" decoding="async" className={`tile-full ${full ? 'is-loaded' : ''}`} onLoad={() => setFull(true)} draggable={false} />}
-      <button className="tile-hit" onClick={onSelect || onOpen} aria-label={onSelect ? '选择' : '查看'} />
+      <button className="tile-hit" onClick={click} {...lp.handlers} aria-label={onSelect ? '选择' : '查看'} />
       {onSelect && <span className="tile-check">{selected && <Check size={14} strokeWidth={3} />}</span>}
       {!onSelect && (
         <>
@@ -171,6 +215,7 @@ export function ImageTile({ img, onOpen, actions, selected, onSelect }: {
             <span className="tile-meta">{img.width}×{img.height}</span>
             <span className="tile-actions">
               <a className="tile-btn" href={`/api/images/${img.id}/download`} title="下载" aria-label="下载"><Download size={16} /></a>
+              <button className="tile-btn" onClick={() => actions.asRef([img])} title="作为参考图" aria-label="作为参考图"><ImagePlus size={16} /></button>
               <button className="tile-btn" onClick={() => actions.reuse(img)} title="再来一张" aria-label="再来一张"><RotateCcw size={16} /></button>
               <button className="tile-btn" onClick={() => actions.remove(img)} title="删除" aria-label="删除"><Trash2 size={16} /></button>
             </span>
@@ -260,6 +305,7 @@ export function Lightbox({ list, index, onIndex, onClose, actions, onChange, alb
           )}
         </div>
         <div className="lb-actions">
+          <button className="btn btn-primary lb-wide" onClick={() => { actions.asRef([img]); onClose() }}><ImagePlus size={16} />作为参考图继续生成</button>
           <a className="btn btn-secondary" href={`/api/images/${img.id}/download`}><Download size={16} />下载原图</a>
           <button className="btn btn-secondary" onClick={() => actions.copy(img)}><Copy size={16} />复制配方</button>
           <button className="btn btn-secondary" onClick={() => { actions.reuse(img); onClose() }}><RotateCcw size={16} />再来一张</button>

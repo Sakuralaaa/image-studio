@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, RotateCw, Plus, Plug, Trash2, ArrowRight } from 'lucide-react'
+import { AlertTriangle, RotateCw, Plus, Plug, Trash2, ArrowRight, ImagePlus } from 'lucide-react'
 import { api, marketImg, type Img, type Job, type MarketPrompt } from '../api'
 import { useStore } from '../store'
 import { Empty, Spinner, useInterval, useNow } from '../components/ui'
@@ -135,12 +135,18 @@ function JobView({ job, onRetry, onDrop, onPatch, onRemove }: {
   const seen = useRef<Set<number> | null>(null)
   if (seen.current === null) seen.current = isActive(job) ? new Set(job.images.map(i => i.id)) : null
   const [revealed, setRevealed] = useState<number[]>([])
+  const [picking, setPicking] = useState(false)
+  const [picked, setPicked] = useState<number[]>([])
+  const togglePick = (id: number) => setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]))
+  const usePicked = async () => { await actions.asRef(job.images.filter(i => picked.includes(i.id))); setPicking(false); setPicked([]) }
   const fresh = (id: number) => !!seen.current && !seen.current.has(id) && !revealed.includes(id)
   const active = isActive(job)
   const n = Math.max(1, Math.min(job.params?.n || 1, 8))
   const slots = active ? Math.max(0, n - job.images.length) : 0
   const count = job.images.length + slots
   const ar = aspectNumber(job.params?.aspect, job.params?.size)
+  // 揭示过程中保持等待面的比例，避免中途跳动；没有预估比例时用图片本身的
+  const slotRatio = (img?: Img) => ar || (img && img.width && img.height ? img.width / img.height : 0)
   useEffect(() => { if (lb !== null && lb >= job.images.length) setLb(job.images.length ? job.images.length - 1 : null) }, [job.images.length])
 
   return (
@@ -155,32 +161,56 @@ function JobView({ job, onRetry, onDrop, onPatch, onRemove }: {
           </div>
         </div>
       ) : (
+        <>
+        {!active && (picking || job.images.length > 1) && (
+          <div className="jv-tools">
+            {picking ? (
+              <>
+                <span className="jv-tools-hint">点选图片，可多选</span>
+                <button className="btn btn-sm btn-primary" disabled={!picked.length} onClick={usePicked}><ImagePlus size={15} />作为参考图{picked.length ? ` ${picked.length}` : ''}</button>
+                <button className="btn btn-sm btn-ghost" onClick={() => { setPicking(false); setPicked([]) }}>取消</button>
+              </>
+            ) : (
+              <button className="btn btn-sm btn-ghost" onClick={() => setPicking(true)}><ImagePlus size={15} />选图作参考</button>
+            )}
+          </div>
+        )}
         <div className={`jv-grid c${Math.min(count, 4)}`}>
-          {job.images.map((img, i) => (
-            <div key={img.id} className="jv-cell" style={{ aspectRatio: `${img.width || 1} / ${img.height || 1}` }}>
-              <ImageTile img={img} actions={actions} onOpen={() => setLb(i)} />
-              {fresh(img.id) && <div className="reveal-cover"><PixelField src={img.thumb} onDone={() => setRevealed(r => [...r, img.id])} /></div>}
-            </div>
-          ))}
-          {Array.from({ length: slots }, (_, i) => (
-            <div key={'s' + i} className="jv-cell" style={{ aspectRatio: String(ar || 1) }}><Pending job={job} /></div>
-          ))}
+          {Array.from({ length: count }, (_, i) => {
+            const img = job.images[i]
+            // 已经在看的图直接显示；等待中的和刚到的图共用同一块等待面，原地揭示
+            if (img && !fresh(img.id)) return (
+              <div key={'i' + img.id} className="jv-cell" style={{ aspectRatio: `${img.width || 1} / ${img.height || 1}` }}>
+                <ImageTile img={img} actions={actions} onOpen={() => setLb(i)} selected={picked.includes(img.id)} onSelect={picking ? () => togglePick(img.id) : undefined} onLongPress={() => { setPicking(true); setPicked([img.id]) }} />
+              </div>
+            )
+            return (
+              <div key={'p' + i} className="jv-cell" style={{ aspectRatio: String(slotRatio(img) || 1) }}>
+                <Pending job={job} src={img?.url} onDone={img ? () => setRevealed(r => [...r, img.id]) : undefined} />
+              </div>
+            )
+          })}
         </div>
+        </>
       )}
       {lb !== null && job.images[lb] && <Lightbox list={job.images} index={lb} onIndex={setLb} onClose={() => setLb(null)} actions={actions} onChange={onPatch} />}
     </section>
   )
 }
 
-function Pending({ job }: { job: Job }) {
-  const now = useNow(true)
-  const elapsed = job.started_at ? now - job.started_at : 0
+function Pending({ job, src, onDone }: { job: Job; src?: string; onDone?: () => void }) {
   return (
     <div className="tile tile-skel tile-pixel">
-      <PixelField />
-      <span className="skel-time">{job.status === 'queued' ? '排队中' : fmtDuration(elapsed)}</span>
+      <PixelField src={src} onDone={onDone} />
+      {!src && <Elapsed job={job} />}
     </div>
   )
+}
+
+function Elapsed({ job }: { job: Job }) {
+  const now = useNow(true)
+  const elapsed = job.started_at ? now - job.started_at : 0
+  return <span className="skel-time">{job.status === 'queued' ? '排队中' : fmtDuration(elapsed)}</span>
 }
 
 let heroCache: MarketPrompt[] | null = null

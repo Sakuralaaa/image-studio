@@ -9,7 +9,7 @@ function routeFromPath(p: string): Route {
   return hit || 'generate'
 }
 
-export interface RefImg { id: number; url: string }
+export interface RefImg { id: number; url: string; src?: number }
 export interface Composer {
   text: string; chips: string[]; vars: Record<string, string>; refs: RefImg[]
   channelId: number | null; model: string; params: Params

@@ -452,6 +452,39 @@ func handleImageDownload(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filepath.Join(dataDir, "images", filepath.Base(im.URL)))
 }
 
+// POST /api/images/{id}/ref：把一张已生成的图复制成参考图，用于继续编辑
+func handleImageAsRef(w http.ResponseWriter, r *http.Request) {
+	im, ok := ownedImage(r)
+	if !ok {
+		httpErr(w, 404, "图片不存在")
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(dataDir, "images", filepath.Base(im.URL)))
+	if err != nil {
+		httpErr(w, 404, "原图已被清理")
+		return
+	}
+	ext, mime := sniffFormat(data)
+	if ext == "" {
+		if data, ext, mime, err = convertRef(data); err != nil {
+			httpErr(w, 400, "这张图片无法作为参考图")
+			return
+		}
+	}
+	file := randName() + "." + ext
+	if err := os.WriteFile(filepath.Join(dataDir, "refs", file), data, 0o644); err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	res, err := db.Exec(`INSERT INTO refs(file,mime,created_at,user_id) VALUES(?,?,?,?)`, file, mime, now(), cur(r).ID)
+	if err != nil {
+		httpErr(w, 500, err.Error())
+		return
+	}
+	id, _ := res.LastInsertId()
+	writeJSON(w, map[string]any{"id": id, "url": "/files/refs/" + file})
+}
+
 // POST /api/images/export {ids:[...]} → zip（原图 + recipes.json）
 func handleImageExport(w http.ResponseWriter, r *http.Request) {
 	var in struct {

@@ -364,7 +364,7 @@ input[type=number]::-webkit-inner-spin-button { opacity: .4; }
 .tile img.is-loaded { opacity: 1; }
 .tile img.tile-full { position: absolute; inset: 0; }
 .tile:hover img { transform: scale(1.02); }
-.tile-hit { position: absolute; inset: 0; z-index: 1; cursor: zoom-in; }
+.tile-hit { position: absolute; inset: 0; z-index: 1; cursor: zoom-in; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .tile::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(to top, rgba(0, 0, 0, .55), transparent 40%); opacity: 0; transition: opacity .2s; }
 .tile:hover::after { opacity: 1; }
 .tile-fav {
@@ -529,6 +529,7 @@ input[type=number]::-webkit-inner-spin-button { opacity: .4; }
 .lb-album { display: flex; align-items: center; gap: 8px; height: var(--h-md); padding: 0 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--field); color: var(--text-3); }
 .lb-album input { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: transparent; color: var(--text); }
 .lb-actions { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 16px; border-top: 1px solid var(--line); }
+.lb-actions .lb-wide { grid-column: 1 / -1; }
 
 /* 提示词市场 */
 .mk-back { position: fixed; inset: 0; z-index: 100; background: var(--scrim); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; padding: 32px; animation: fade .16s; }
@@ -829,6 +830,8 @@ input[type=number]::-webkit-inner-spin-button { opacity: .4; }
 .jv-grid.c1 .jv-cell { height: clamp(240px, calc(100vh - var(--top) - var(--dock-h) - 120px), 820px); }
 .jv-grid.c2 .jv-cell { height: clamp(200px, calc(100vh - var(--top) - var(--dock-h) - 120px), 640px); max-width: calc(50% - 6px); }
 .jv-grid.c3 .jv-cell, .jv-grid.c4 .jv-cell { height: clamp(160px, calc((100vh - var(--top) - var(--dock-h) - 132px) / 2), 400px); max-width: calc(50% - 6px); }
+.jv-tools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 32px; margin-bottom: -8px; }
+.jv-tools-hint { font-size: 13px; color: var(--text-2); margin-right: auto; }
 .jv-fail { margin: 40px auto 0; max-width: 520px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; color: var(--text-2); }
 .jv-fail-text { font-size: 14px; line-height: 22px; word-break: break-word; }
 .jv-fail-actions { display: flex; gap: 8px; }
@@ -850,9 +853,14 @@ input[type=number]::-webkit-inner-spin-button { opacity: .4; }
 }
 
 /* 像素网格等待/揭示动画 */
-.pixel-field { position: absolute; inset: 0; width: 100%; height: 100%; display: block; color: var(--text-2); pointer-events: none; }
-.tile-pixel { background: var(--well); animation: none; }
-.tile-pixel .skel-time { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 2px 10px; border-radius: 10px; background: var(--bg); color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
-.reveal-cover { position: absolute; inset: 0; z-index: 3; pointer-events: none; border-radius: var(--r-md); overflow: hidden; }
-.reveal-cover .pixel-field { --pf-bg: var(--well); }
-.rail-item .pixel-field { border-radius: inherit; }
+.pixel-field { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: var(--text-2); background: var(--bg); border-radius: inherit; contain: strict; }
+.pf-cell { position: absolute; display: block; background: currentColor; opacity: .16; animation: pf-blink 2000ms ease-in-out infinite both; will-change: opacity; }
+.is-filled .pf-cell { animation: none; transition: left .5s ease, top .5s ease, width .5s ease, height .5s ease, background-color .5s ease, opacity .5s ease; }
+.is-fading .pf-cell { transition: opacity .6s ease; }
+.pf-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; }
+.is-filled .pf-img { opacity: 1; }
+@keyframes pf-blink { 0%, 100% { opacity: .16; } 50% { opacity: .62; } }
+@media (prefers-reduced-motion: reduce) { .pf-cell { animation: none; opacity: .24; } }
+.tile-pixel { background: var(--bg); animation: none; }
+.tile-pixel .skel-time { position: absolute; z-index: 2; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 2px 10px; border-radius: 10px; background: var(--well); color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.rail-item .pixel-field { border-radius: inherit; background: var(--well); }
