@@ -300,7 +300,7 @@ input[type=number]::-webkit-inner-spin-button { opacity: .4; }
 .topbar.is-scrolled { background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: saturate(1.4) blur(12px); box-shadow: 0 1px 0 var(--line); }
 .brand { display: inline-flex; align-items: center; gap: 8px; justify-self: start; height: var(--h-md); padding-right: 8px; }
 .brand b { font-size: 15px; font-weight: 600; letter-spacing: .02em; }
-.seal { display: inline-grid; place-items: center; border-radius: 8px; background: var(--accent); color: var(--accent-fg); font-weight: 700; line-height: 1; flex: none; }
+.seal { display: block; flex: none; --seal-a: color-mix(in oklab, var(--accent) 82%, white); --seal-b: var(--accent); --seal-fg: var(--accent-fg); filter: drop-shadow(0 1px 1.5px rgb(0 0 0 / .12)); }
 .nav { display: flex; gap: 2px; padding: 4px; border-radius: 20px; background: var(--chip); border: 1px solid var(--line); }
 .nav-item { height: var(--h-sm); padding: 0 16px; border-radius: 16px; font-size: 14px; font-weight: 500; color: var(--text-2); transition: background .15s, color .15s; white-space: nowrap; }
 .nav-item:hover { color: var(--text); }

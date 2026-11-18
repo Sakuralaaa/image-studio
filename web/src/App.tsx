@@ -28,7 +28,19 @@ export default function App() {
 }
 
 export function Seal({ size = 28 }: { size?: number }) {
-  return <span className="seal" style={{ width: size, height: size, fontSize: Math.round(size * 0.54) }}>影</span>
+  return (
+    <svg className="seal" width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="seal-g" x1="4" y1="2" x2="28" y2="30" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="var(--seal-a)" />
+          <stop offset="1" stopColor="var(--seal-b)" />
+        </linearGradient>
+      </defs>
+      <rect x="2" y="2" width="28" height="28" rx="8.5" fill="url(#seal-g)" />
+      <circle cx="16" cy="16" r="11.2" stroke="var(--seal-fg)" strokeWidth="1.9" />
+      <path d="M16.00 11.40L27.06 17.78M19.98 13.70L19.98 26.47M19.98 18.30L8.93 24.68M16.00 20.60L4.94 14.22M12.02 18.30L12.02 5.53M12.02 13.70L23.07 7.32" stroke="var(--seal-fg)" strokeWidth="1.9" strokeLinecap="round" />
+    </svg>
+  )
 }
 
 function Shell() {
