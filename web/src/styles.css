@@ -362,6 +362,7 @@ input[type=number]::-webkit-inner-spin-button { opacity: .4; }
 .tile { position: relative; width: 100%; height: 100%; margin: 0; overflow: hidden; border-radius: var(--r-md); background: var(--well); }
 .tile img { width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .3s, transform .5s var(--ease); }
 .tile img.is-loaded { opacity: 1; }
+.tile img.tile-full { position: absolute; inset: 0; }
 .tile:hover img { transform: scale(1.02); }
 .tile-hit { position: absolute; inset: 0; z-index: 1; cursor: zoom-in; }
 .tile::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(to top, rgba(0, 0, 0, .55), transparent 40%); opacity: 0; transition: opacity .2s; }
@@ -626,6 +627,10 @@ input[type=number]::-webkit-inner-spin-button { opacity: .4; }
 .cap-mode .seg { width: auto; display: inline-flex; }
 .cap-mode .seg .seg-item { flex: none; padding: 0 10px; }
 .cap-detail { min-width: 0; display: flex; justify-content: flex-end; }
+.cap-quick { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 6px; margin-top: -2px; }
+.qchip { height: 26px; padding: 0 10px; border-radius: 13px; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-2); background: var(--well); border: 1px solid transparent; transition: background .15s, color .15s; }
+.qchip:hover { background: var(--chip-hover); color: var(--text); }
+.qchip.is-on { color: var(--accent-text); border-color: var(--accent); background: transparent; }
 .cap-detail .seg { display: inline-flex; width: auto; }
 .cap-detail .seg .seg-item { flex: none; padding: 0 10px; }
 .cap-values { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
@@ -731,6 +736,7 @@ input[type=number]::-webkit-inner-spin-button { opacity: .4; }
   .span-2 { grid-column: auto; }
   .cap { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px; }
   .cap-detail { justify-content: flex-start; }
+  .cap-quick { grid-column: 1 / -1; }
   .cap-mode .seg { display: flex; width: 100%; }
   .cap-mode .seg .seg-item { flex: 1 1 0; }
   .theme-pick { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -842,3 +848,11 @@ input[type=number]::-webkit-inner-spin-button { opacity: .4; }
   .jv-grid.c2 .jv-cell, .jv-grid.c3 .jv-cell, .jv-grid.c4 .jv-cell { height: auto; width: calc(50% - 4px); max-width: none; aspect-ratio: 3 / 4 !important; }
   .hero { min-height: calc(100vh - var(--top) - var(--dock-h) - 120px); }
 }
+
+/* 像素网格等待/揭示动画 */
+.pixel-field { position: absolute; inset: 0; width: 100%; height: 100%; display: block; color: var(--text-2); pointer-events: none; }
+.tile-pixel { background: var(--well); animation: none; }
+.tile-pixel .skel-time { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 2px 10px; border-radius: 10px; background: var(--bg); color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.reveal-cover { position: absolute; inset: 0; z-index: 3; pointer-events: none; border-radius: var(--r-md); overflow: hidden; }
+.reveal-cover .pixel-field { --pf-bg: var(--well); }
+.rail-item .pixel-field { border-radius: inherit; }

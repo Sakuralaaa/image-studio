@@ -172,7 +172,7 @@ function CmpCell({ job, idx, onOpen, onFav }: { job: Job; idx: number; onOpen: (
       </div>
       <div className="cmp-frame">
         {active && <div className="skel-center"><Spinner size={20} /><span className="skel-time">{fmtDuration(elapsed)}</span></div>}
-        {job.status === 'done' && img && <img src={img.thumb} alt="" onClick={onOpen} />}
+        {job.status === 'done' && img && <img src={img.url} alt="" onClick={onOpen} />}
         {job.status === 'failed' && <div className="cmp-fail"><AlertTriangle size={20} /><span data-clamp title={job.error}>{job.error || '生成失败'}</span></div>}
       </div>
       <dl className="cmp-meta">

@@ -7,6 +7,7 @@ import { ImageTile, Lightbox, useImageActions } from '../components/gallery'
 import { useSentinel } from '../components/useImages'
 import { Composer } from '../components/composer'
 import { useApplyMarket } from '../components/market'
+import { PixelField } from '../components/pixel'
 import { aspectNumber, fmtDuration } from '../labels'
 
 const PAGE = 30
@@ -118,7 +119,7 @@ function RailItem({ job, on, onClick }: { job: Job; on: boolean; onClick: () => 
     <button className={`rail-item ${on ? 'is-on' : ''} ${failed ? 'is-fail' : ''}`} onClick={onClick} title={job.prompt} aria-label={job.prompt}>
       {first ? <img src={first.thumb} alt="" loading="lazy" draggable={false} />
         : failed ? <AlertTriangle size={18} />
-        : <Spinner size={16} />}
+        : <PixelField size="sm" />}
       {isActive(job) && first && <span className="rail-spin"><Spinner size={14} /></span>}
       {job.images.length > 1 && <span className="rail-count">{job.images.length}</span>}
     </button>
@@ -130,6 +131,11 @@ function JobView({ job, onRetry, onDrop, onPatch, onRemove }: {
 }) {
   const [lb, setLb] = useState<number | null>(null)
   const actions = useImageActions(onPatch, onRemove)
+  // 打开时仍在生成的任务，之后到达的图片播放揭示动画
+  const seen = useRef<Set<number> | null>(null)
+  if (seen.current === null) seen.current = isActive(job) ? new Set(job.images.map(i => i.id)) : null
+  const [revealed, setRevealed] = useState<number[]>([])
+  const fresh = (id: number) => !!seen.current && !seen.current.has(id) && !revealed.includes(id)
   const active = isActive(job)
   const n = Math.max(1, Math.min(job.params?.n || 1, 8))
   const slots = active ? Math.max(0, n - job.images.length) : 0
@@ -153,6 +159,7 @@ function JobView({ job, onRetry, onDrop, onPatch, onRemove }: {
           {job.images.map((img, i) => (
             <div key={img.id} className="jv-cell" style={{ aspectRatio: `${img.width || 1} / ${img.height || 1}` }}>
               <ImageTile img={img} actions={actions} onOpen={() => setLb(i)} />
+              {fresh(img.id) && <div className="reveal-cover"><PixelField src={img.thumb} onDone={() => setRevealed(r => [...r, img.id])} /></div>}
             </div>
           ))}
           {Array.from({ length: slots }, (_, i) => (
@@ -169,11 +176,9 @@ function Pending({ job }: { job: Job }) {
   const now = useNow(true)
   const elapsed = job.started_at ? now - job.started_at : 0
   return (
-    <div className="tile tile-skel">
-      <div className="skel-center">
-        <Spinner size={20} />
-        <span className="skel-time">{job.status === 'queued' ? '排队中' : fmtDuration(elapsed)}</span>
-      </div>
+    <div className="tile tile-skel tile-pixel">
+      <PixelField />
+      <span className="skel-time">{job.status === 'queued' ? '排队中' : fmtDuration(elapsed)}</span>
     </div>
   )
 }

@@ -154,9 +154,11 @@ export function ImageTile({ img, onOpen, actions, selected, onSelect }: {
   selected?: boolean; onSelect?: () => void
 }) {
   const [loaded, setLoaded] = useState(false)
+  const [full, setFull] = useState(false)
   return (
     <figure className={`tile ${selected ? 'is-selected' : ''} ${onSelect ? 'is-selecting' : ''} ${img.favorite ? 'is-fav' : ''}`}>
       <img src={img.thumb} alt="" loading="lazy" decoding="async" className={loaded ? 'is-loaded' : ''} onLoad={() => setLoaded(true)} draggable={false} />
+      {loaded && <img src={img.url} alt="" loading="lazy" decoding="async" className={`tile-full ${full ? 'is-loaded' : ''}`} onLoad={() => setFull(true)} draggable={false} />}
       <button className="tile-hit" onClick={onSelect || onOpen} aria-label={onSelect ? '选择' : '查看'} />
       {onSelect && <span className="tile-check">{selected && <Check size={14} strokeWidth={3} />}</span>}
       {!onSelect && (

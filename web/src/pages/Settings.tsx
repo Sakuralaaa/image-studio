@@ -106,6 +106,20 @@ const capModes: Record<keyof Caps, string[]> = {
   response: ['native', 'off'], refs: ['multipart', 'json', 'off'],
 }
 const capHasValues: (keyof Caps)[] = ['size', 'aspect', 'resolution', 'quality', 'format', 'background', 'moderation']
+// 各项常用可选值：点一下加入/移除，特殊值仍可手动输入
+const capCommon: Partial<Record<keyof Caps, string[]>> = {
+  aspect: ['1:1', '3:4', '4:3', '9:16', '16:9', '2:3', '3:2', '21:9'],
+  size: ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x2048', '1792x1024', '1024x1792'],
+  resolution: ['1k', '2k', '4k'],
+  quality: ['auto', 'low', 'medium', 'high'],
+  format: ['png', 'jpeg', 'webp'],
+  background: ['auto', 'transparent', 'opaque'],
+  moderation: ['auto', 'low'],
+}
+const capStarter: Partial<Record<keyof Caps, string[]>> = {
+  aspect: ['1:1', '3:4', '4:3', '9:16', '16:9'], size: ['1024x1024', '1536x1024', '1024x1536'], resolution: ['1k', '2k'],
+  quality: ['low', 'medium', 'high'], format: ['png', 'jpeg', 'webp'], background: ['auto', 'transparent', 'opaque'], moderation: ['auto', 'low'],
+}
 const capOrder: (keyof Caps)[] = ['aspect', 'size', 'resolution', 'quality', 'n', 'format', 'compression', 'background', 'moderation', 'response', 'refs']
 
 function ChannelEditor({ initial, onClose, onSaved }: { initial: Partial<Channel>; onClose: () => void; onSaved: () => void }) {
@@ -126,6 +140,11 @@ function ChannelEditor({ initial, onClose, onSaved }: { initial: Partial<Channel
 
   const applyPreset = (p: Preset) => {
     setPreset(p.key)
+    if (!isNew) {
+      // 编辑已有渠道：只套用能力档案，不动名称、地址和模型
+      setCh(c => ({ ...c, api_type: p.api_type, caps: JSON.parse(JSON.stringify(p.caps)) }))
+      return
+    }
     setCh(c => ({
       ...c,
       name: c.name || p.name,
@@ -165,9 +184,9 @@ function ChannelEditor({ initial, onClose, onSaved }: { initial: Partial<Channel
   return (
     <Modal open onClose={onClose} wide title={isNew ? '新建渠道' : '编辑渠道'} className="ch-editor"
       footer={<><button className="btn btn-secondary" onClick={onClose}>取消</button><button className="btn btn-primary" onClick={save} disabled={saving}>{saving && <Spinner />}保存</button></>}>
-      {isNew && presets.length > 0 && (
+      {presets.length > 0 && (
         <div className="field">
-          <span className="field-label">快速填充</span>
+          <span className="field-label">{isNew ? '快速填充' : '套用能力档案'}</span>
           <div className="presets">
             {presets.map(p => <button key={p.key} className={`preset ${preset === p.key ? 'is-on' : ''}`} onClick={() => applyPreset(p)}>{p.name}</button>)}
           </div>
@@ -222,7 +241,11 @@ function ChannelEditor({ initial, onClose, onSaved }: { initial: Partial<Channel
               <div key={k} className={`cap ${off ? 'is-off' : ''}`}>
                 <div className="cap-name">{capLabels[k]}</div>
                 <div className="cap-mode">
-                  <Segmented size="sm" value={cap.mode} onChange={v => setCap(k, { mode: v as any })} options={capModes[k].map(m => ({ value: m, label: modeLabels[m] }))} />
+                  <Segmented size="sm" value={cap.mode} onChange={v => {
+                    const empty = !(cap.values || []).length
+                    const start = v !== 'off' && empty && capStarter[k] ? capStarter[k]! : null
+                    setCap(k, start ? { mode: v as any, values: start, default: start[0] } : { mode: v as any })
+                  }} options={capModes[k].map(m => ({ value: m, label: modeLabels[m] }))} />
                 </div>
                 <div className="cap-detail">
                   {!off && capHasValues.includes(k) && (
@@ -241,6 +264,20 @@ function ChannelEditor({ initial, onClose, onSaved }: { initial: Partial<Channel
                     <Segmented size="sm" value={cap.values?.[0] || 'url'} onChange={v => setCap(k, { values: [v] })} options={[{ value: 'url', label: '链接' }, { value: 'b64_json', label: '内嵌数据' }]} />
                   )}
                 </div>
+                {!off && capCommon[k] && (
+                  <div className="cap-quick">
+                    {capCommon[k]!.map(v => {
+                      const vs = cap.values || []
+                      const has = vs.includes(v)
+                      return (
+                        <button key={v} type="button" className={`qchip ${has ? 'is-on' : ''}`} onClick={() => {
+                          const values = has ? vs.filter(x => x !== v) : [...vs, v]
+                          setCap(k, { values, default: values.includes(cap.default || '') ? cap.default : values[0] })
+                        }}>{has && <Check size={12} strokeWidth={3} />}{valueLabel(k, v)}</button>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             )
           })}
