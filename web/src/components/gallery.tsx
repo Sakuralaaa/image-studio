@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronLeft, ChevronRight, Copy, Download, Heart, RotateCcw, Trash2, X, Check, FolderOpen } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Copy, Download, Star, RotateCcw, Trash2, X, Check, FolderOpen, Clock } from 'lucide-react'
 import { api, type Img } from '../api'
 import { useStore } from '../store'
 import { apiTypeLabels, describeParams, fmtBytes, fmtDuration, fmtTime, ratioOf } from '../labels'
@@ -26,7 +26,7 @@ export function useImageActions(onChange: (img: Img) => void, onRemove: (id: num
     async fav(img: Img) {
       const next = await api<Img>(`/api/images/${img.id}`, { method: 'PATCH', body: { favorite: !img.favorite } })
       onChange(next)
-      toast(next.favorite ? '已收藏为资产' : '已取消收藏')
+      toast(next.favorite ? '已收藏，不会被自动清理' : '已取消收藏')
     },
     async copy(img: Img) {
       if (await copyText(recipeText(img))) toast('配方已复制')
@@ -39,7 +39,7 @@ export function useImageActions(onChange: (img: Img) => void, onRemove: (id: num
       toast(exists ? '配方已填入' : '配方已填入，原模型已不可用', exists ? 'ok' : 'info')
     },
     async remove(img: Img) {
-      if (img.favorite && !confirm('这张图是资产，确定删除原图吗？')) return
+      if (img.favorite && !confirm('这张图已收藏，确定删除吗？')) return
       await api(`/api/images/${img.id}`, { method: 'DELETE' })
       onRemove(img.id)
       toast('已删除')
@@ -142,6 +142,13 @@ export function Justified<T>({ items, aspect, render, keyOf }: {
   )
 }
 
+export function leftText(exp: number) {
+  const h = (exp - Date.now()) / 3600e3
+  if (h <= 1) return '即将清理'
+  if (h < 48) return `${Math.ceil(h)} 小时`
+  return `${Math.ceil(h / 24)} 天`
+}
+
 export function ImageTile({ img, onOpen, actions, selected, onSelect }: {
   img: Img; onOpen: () => void; actions: ReturnType<typeof useImageActions>
   selected?: boolean; onSelect?: () => void
@@ -154,8 +161,9 @@ export function ImageTile({ img, onOpen, actions, selected, onSelect }: {
       {onSelect && <span className="tile-check">{selected && <Check size={14} strokeWidth={3} />}</span>}
       {!onSelect && (
         <>
+          {!img.favorite && !!img.expires_at && <span className="tile-exp"><Clock size={12} />{leftText(img.expires_at)}</span>}
           <button className="tile-fav" onClick={() => actions.fav(img)} aria-label={img.favorite ? '取消收藏' : '收藏'} title={img.favorite ? '取消收藏' : '收藏'}>
-            <Heart size={16} fill={img.favorite ? 'currentColor' : 'none'} />
+            <Star size={16} fill={img.favorite ? 'currentColor' : 'none'} />
           </button>
           <div className="tile-bar">
             <span className="tile-meta">{img.width}×{img.height}</span>
@@ -206,7 +214,7 @@ export function Lightbox({ list, index, onIndex, onClose, actions, onChange, alb
         <div className="lb-head">
           <span className="lb-title">配方</span>
           <button className={`btn btn-sm ${img.favorite ? 'btn-primary' : 'btn-secondary'}`} onClick={() => actions.fav(img)}>
-            <Heart size={14} fill={img.favorite ? 'currentColor' : 'none'} />{img.favorite ? '已收藏' : '收藏'}
+            <Star size={14} fill={img.favorite ? 'currentColor' : 'none'} />{img.favorite ? '已收藏' : '收藏'}
           </button>
         </div>
         <div className="lb-scroll">

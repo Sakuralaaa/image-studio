@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Search, CheckSquare, PackageOpen, X, FolderOpen } from 'lucide-react'
 import { api, downloadPost, type Facet, type Img, type UserRow } from '../api'
 import { useStore } from '../store'
-import { Empty, Select, Spinner } from '../components/ui'
+import { Empty, Segmented, Select, Spinner } from '../components/ui'
 import { ImageTile, Justified, Lightbox, useImageActions } from '../components/gallery'
 import { useImages, useSentinel } from '../components/useImages'
 import { PageHead } from './Compare'
@@ -26,6 +26,7 @@ export function UserScope({ value, onChange, tick, noCount }: { value: string; o
 export default function Assets() {
   const { galleryTick, toast, isAdmin } = useStore()
   const [scope, setScope] = useState('me')
+  const [kind, setKind] = useState<'' | 'temp' | 'fav'>('')
   const [q, setQ] = useState('')
   const [qd, setQd] = useState('')
   const [album, setAlbum] = useState('')
@@ -42,12 +43,13 @@ export default function Assets() {
   const reloadFacets = () => api<Facets>('/api/facets' + (isAdmin ? '?user=' + (scope || 'all') : '')).then(setFacets).catch(() => {})
   useEffect(() => { reloadFacets() }, [galleryTick, tick, scope])
 
-  const g = useImages({ fav: '1', q: qd, album, tag, channel, model, user: isAdmin ? scope : '' }, galleryTick + tick)
+  const g = useImages({ fav: kind === 'fav' ? '1' : kind === 'temp' ? '0' : '', q: qd, album, tag, channel, model, user: isAdmin ? scope : '' }, galleryTick + tick)
   const sentinel = useSentinel(g.more, !!g.next)
-  const actions = useImageActions(img => { if (!img.favorite) g.remove(img.id); else g.update(img); setTick(t => t + 1) }, id => { g.remove(id); setTick(t => t + 1) })
+  const actions = useImageActions(img => { if ((kind === 'fav' && !img.favorite) || (kind === 'temp' && img.favorite)) g.remove(img.id); else g.update(img); setTick(t => t + 1) }, id => { g.remove(id); setTick(t => t + 1) })
   useEffect(() => { if (lb !== null && lb >= g.images.length) setLb(g.images.length ? g.images.length - 1 : null) }, [g.images.length])
 
   const filtered = !!(qd || album || tag || channel || model)
+  const temp = facets ? facets.total - facets.favorites : 0
   const toggle = (id: number) => setSel(s => (s.includes(id) ? s.filter(x => x !== id) : [...s, id]))
   const exportZip = () => {
     if (selecting && sel.length) downloadPost('/api/images/export', { ids: sel })
@@ -58,9 +60,11 @@ export default function Assets() {
 
   return (
     <div className="page page-assets">
-      <PageHead title="资产" sub={facets ? `${facets.favorites} 张 · ${fmtBytes(facets.bytes)}` : undefined} />
+      <PageHead title="图库" sub={facets ? `${facets.total} 张 · ${fmtBytes(facets.bytes)}` : undefined} />
 
       <div className="toolbar">
+        <Segmented block={false} value={kind || 'all'} onChange={v => { setKind(v === 'all' ? '' : v as any); if (v === 'temp') setAlbum('') }}
+          options={[{ value: 'all', label: '全部' }, { value: 'temp', label: `临时${facets ? ' ' + temp : ''}` }, { value: 'fav', label: `已收藏${facets ? ' ' + facets.favorites : ''}` }]} />
         <div className="search"><Search size={16} /><input value={q} onChange={e => setQ(e.target.value)} placeholder={isAdmin ? "搜索提示词、标签、渠道或模型" : "搜索提示词、标签或模型"} /></div>
         {isAdmin && <UserScope value={scope} onChange={setScope} tick={tick} />}
         {isAdmin && facets && facets.channels.length > 1 && <Select className="filter-sel" value={channel} placeholder="全部渠道" onChange={setChannel} options={[{ value: '', label: '全部渠道' }, ...facets.channels.map(f => ({ value: f.name, label: f.name, hint: String(f.count) }))]} />}
@@ -68,12 +72,12 @@ export default function Assets() {
         <button className={`btn ${selecting ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setSelecting(s => !s); setSel([]) }}>
           {selecting ? <X size={16} /> : <CheckSquare size={16} />}<span className="hide-xs">{selecting ? '取消选择' : '批量选择'}</span>
         </button>
-        <button className="btn btn-secondary" onClick={exportZip}><PackageOpen size={16} /><span className="hide-xs">{selecting ? `导出所选${sel.length ? ` ${sel.length}` : ''}` : '全部导出'}</span></button>
+        <button className="btn btn-secondary" onClick={exportZip}><PackageOpen size={16} /><span className="hide-xs">{selecting ? `导出所选${sel.length ? ` ${sel.length}` : ''}` : '导出收藏'}</span></button>
       </div>
 
-      {facets && (facets.albums.length > 0 || facets.tags.length > 0) && (
+      {kind !== 'temp' && facets && (facets.albums.length > 0 || facets.tags.length > 0) && (
         <div className="albums">
-          <button className={`chip ${!album ? 'is-on' : ''}`} onClick={() => setAlbum('')}><span>全部</span><em>{facets.favorites}</em></button>
+          <button className={`chip ${!album ? 'is-on' : ''}`} onClick={() => setAlbum('')}><span>全部相册</span></button>
           {facets.albums.map(a => (
             <button key={a.name} className={`chip ${album === a.name ? 'is-on' : ''}`} onClick={() => setAlbum(album === a.name ? '' : a.name)}>
               <FolderOpen size={16} /><span>{a.name}</span><em>{a.count}</em>
@@ -87,7 +91,7 @@ export default function Assets() {
       )}
 
       {g.loaded && g.images.length === 0 ? (
-        <Empty art="stack" title={filtered ? '没有匹配的资产' : '还没有资产'}  />
+        <Empty art="stack" title={filtered ? '没有匹配的图片' : kind === 'fav' ? '还没有收藏' : kind === 'temp' ? '没有临时图片' : '还没有图片'} />
       ) : (
         <Justified items={g.images} keyOf={i => i.id} aspect={i => (i.width || 1) / (i.height || 1)}
           render={(img: Img) => <ImageTile img={img} actions={actions} onOpen={() => setLb(g.images.findIndex(x => x.id === img.id))}

@@ -219,8 +219,11 @@ func queryImages(where string, args ...any) ([]*ImageOut, error) {
 func handleImageList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	conds, args := imageScope(cur(r), q.Get("user"))
-	if q.Get("fav") == "1" {
+	switch q.Get("fav") {
+	case "1":
 		conds = append(conds, "i.favorite=1")
+	case "0":
+		conds = append(conds, "i.favorite=0")
 	}
 	if c, _ := strconv.ParseInt(q.Get("cursor"), 10, 64); c > 0 {
 		conds = append(conds, "i.id<?")

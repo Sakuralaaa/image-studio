@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, X, Columns3, Heart, AlertTriangle, Plug } from 'lucide-react'
+import { Plus, X, Columns3, Star, AlertTriangle, Plug } from 'lucide-react'
 import { api, type Img, type Job, type Params } from '../api'
 import { useStore, type RefImg } from '../store'
 import { Empty, Select, Spinner, useInterval, useNow } from '../components/ui'
@@ -168,7 +168,7 @@ function CmpCell({ job, idx, onOpen, onFav }: { job: Job; idx: number; onOpen: (
       <div className="cmp-cell-head">
         <span className="letter">{String.fromCharCode(65 + idx)}</span>
         <div className="cmp-cell-title">{job.channel_name ? <><b title={job.channel_name}>{job.channel_name}</b><span title={job.model}>{job.model}</span></> : <b title={job.model}>{job.model}</b>}</div>
-        {img && <button className={`icon-btn sm ${img.favorite ? 'is-fav' : ''}`} onClick={() => onFav(img)} aria-label="收藏" title={img.favorite ? '取消收藏' : '收藏'}><Heart size={16} fill={img.favorite ? 'currentColor' : 'none'} /></button>}
+        {img && <button className={`icon-btn sm ${img.favorite ? 'is-fav' : ''}`} onClick={() => onFav(img)} aria-label="收藏" title={img.favorite ? '取消收藏' : '收藏'}><Star size={16} fill={img.favorite ? 'currentColor' : 'none'} /></button>}
       </div>
       <div className="cmp-frame">
         {active && <div className="skel-center"><Spinner size={20} /><span className="skel-time">{fmtDuration(elapsed)}</span></div>}

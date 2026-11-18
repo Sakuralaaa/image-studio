@@ -825,7 +825,12 @@ func handleJobList(w http.ResponseWriter, r *http.Request) {
 		limit = 8
 	}
 	u := cur(r)
-	jobs, err := queryJobs(`WHERE kind='single' AND user_id=? ORDER BY id DESC LIMIT ?`, u.ID, limit)
+	before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
+	if before <= 0 {
+		before = 1 << 62
+	}
+	// 已完成但图片都被清理/删除的任务不再列出
+	jobs, err := queryJobs(`WHERE kind='single' AND user_id=? AND id<? AND (status<>'done' OR id IN (SELECT job_id FROM images)) ORDER BY id DESC LIMIT ?`, u.ID, before, limit)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return

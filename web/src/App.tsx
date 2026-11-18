@@ -12,7 +12,7 @@ import { PromptMarket } from './components/market'
 const nav: { r: Route; label: string }[] = [
   { r: 'generate', label: '生成' },
   { r: 'compare', label: '对比' },
-  { r: 'assets', label: '资产' },
+  { r: 'assets', label: '图库' },
   { r: 'settings', label: '设置' },
 ]
 

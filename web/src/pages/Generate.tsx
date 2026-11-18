@@ -1,75 +1,87 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, RotateCw, X, Plug, ArrowRight, Sparkles } from 'lucide-react'
+import { AlertTriangle, RotateCw, Plus, Plug, Trash2, ArrowRight } from 'lucide-react'
 import { api, marketImg, type Img, type Job, type MarketPrompt } from '../api'
 import { useStore } from '../store'
-import { Empty, Segmented, Spinner, useInterval, useNow } from '../components/ui'
-import { UserScope } from './Assets'
-import { ImageTile, Justified, Lightbox, useImageActions } from '../components/gallery'
-import { useImages, useSentinel } from '../components/useImages'
+import { Empty, Spinner, useInterval, useNow } from '../components/ui'
+import { ImageTile, Lightbox, useImageActions } from '../components/gallery'
+import { useSentinel } from '../components/useImages'
 import { Composer } from '../components/composer'
 import { useApplyMarket } from '../components/market'
-import { aspectNumber, fmtDuration } from '../labels'
+import { aspectNumber, fmtDuration, fmtTime } from '../labels'
 
-type Cell = { kind: 'img'; img: Img } | { kind: 'job'; job: Job; slot: number }
+const PAGE = 30
+const isActive = (j: Job) => j.status === 'queued' || j.status === 'running'
 
 export default function Generate() {
-  const { channels, channelsLoaded, go, galleryTick, bumpGallery, genView, setGenView, isAdmin, reloadMe, toast } = useStore()
-  const [scope, setScope] = useState('me')
+  const { channels, channelsLoaded, go, bumpGallery, isAdmin, reloadMe, toast } = useStore()
   const [jobs, setJobs] = useState<Job[]>([])
-  const [dismissed, setDismissed] = useState<number[]>(() => JSON.parse(sessionStorage.getItem('studio.dismissed') || '[]'))
-  const [favOnly, setFavOnly] = useState(false)
+  const [more, setMore] = useState(true)
+  const [sel, setSelState] = useState<number>(() => Number(sessionStorage.getItem('studio.job') || 0))
+  const setSel = (id: number) => { sessionStorage.setItem('studio.job', String(id)); setSelState(id) }
   const prevActive = useRef<Set<number>>(new Set())
+  const busy = useRef(false)
 
-  const loadJobs = async () => {
-    const res = await api<{ jobs: Job[] }>('/api/jobs?limit=8')
-    setJobs(res.jobs)
-    const active = new Set(res.jobs.filter(j => j.status === 'queued' || j.status === 'running').map(j => j.id))
+  // 刷新最新一页，合并到已加载的列表里
+  const refresh = async () => {
+    const res = await api<{ jobs: Job[] }>(`/api/jobs?limit=${PAGE}`)
+    setJobs(old => {
+      const fresh = new Map(res.jobs.map(j => [j.id, j]))
+      const minId = res.jobs.length ? res.jobs[res.jobs.length - 1].id : 0
+      const tail = old.filter(j => j.id < minId && !fresh.has(j.id))
+      return [...res.jobs, ...tail]
+    })
+    if (res.jobs.length < PAGE) setMore(false)
+    const active = new Set(res.jobs.filter(isActive).map(j => j.id))
     let finished = false
     prevActive.current.forEach(id => { if (!active.has(id)) finished = true })
     prevActive.current = active
     if (finished) { bumpGallery(); reloadMe() }
   }
-  useEffect(() => { loadJobs().catch(() => {}) }, [])
-  const anyActive = jobs.some(j => j.status === 'queued' || j.status === 'running')
-  useInterval(() => { loadJobs().catch(() => {}) }, anyActive ? 1500 : null)
-  useEffect(() => { sessionStorage.setItem('studio.dismissed', JSON.stringify(dismissed)) }, [dismissed])
+  const loadMore = async () => {
+    if (busy.current || !more || !jobs.length) return
+    busy.current = true
+    try {
+      const res = await api<{ jobs: Job[] }>(`/api/jobs?limit=${PAGE}&before=${jobs[jobs.length - 1].id}`)
+      setJobs(l => [...l, ...res.jobs.filter(j => !l.some(x => x.id === j.id))])
+      if (res.jobs.length < PAGE) setMore(false)
+    } finally { busy.current = false }
+  }
+  useEffect(() => { refresh().catch(() => {}) }, [])
+  const anyActive = jobs.some(isActive)
+  useInterval(() => { refresh().catch(() => {}) }, anyActive ? 1500 : null)
+  const sentinel = useSentinel(loadMore, more && jobs.length > 0)
 
   const onJob = (job: Job) => {
     setJobs(js => [job, ...js])
     prevActive.current.add(job.id)
-    setGenView('gallery')
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    setSel(job.id)
   }
   const retry = async (j: Job) => {
     try {
       const job = await api<Job>('/api/jobs', { body: { channel_id: j.channel_id, model: j.model, prompt: j.prompt, params: j.params, refs: j.refs } })
+      api(`/api/jobs/${j.id}`, { method: 'DELETE' }).catch(() => {})
       setJobs(js => [job, ...js.filter(x => x.id !== j.id)])
       prevActive.current.add(job.id)
-      api(`/api/jobs/${j.id}`, { method: 'DELETE' }).catch(() => {})
+      setSel(job.id)
       reloadMe()
     } catch (e: any) { toast(e.message, 'err') }
   }
-  const dismiss = (j: Job) => { setDismissed(d => [...d, j.id]); api(`/api/jobs/${j.id}`, { method: 'DELETE' }).catch(() => {}) }
+  const dropJob = (j: Job) => {
+    api(`/api/jobs/${j.id}`, { method: 'DELETE' }).catch(() => {})
+    setJobs(js => js.filter(x => x.id !== j.id))
+    setSel(0)
+  }
+  // 结果里的图片被收藏/删除后同步到任务列表
+  const patchImg = (img: Img) => setJobs(js => js.map(j => (j.id === img.job_id ? { ...j, images: j.images.map(x => (x.id === img.id ? img : x)) } : j)))
+  const removeImg = (id: number) => setJobs(js => js.flatMap(j => {
+    if (!j.images.some(x => x.id === id)) return [j]
+    const images = j.images.filter(x => x.id !== id)
+    if (!images.length && j.status === 'done') { if (j.id === sel) setSel(0); return [] }
+    return [{ ...j, images }]
+  }))
 
-  const hist = useImages({ fav: favOnly ? '1' : '', user: isAdmin ? scope : '' }, galleryTick)
-  const patch = (img: Img) => hist.update(img)
-  const actions = useImageActions(img => { if (favOnly && !img.favorite) hist.remove(img.id); else patch(img) }, id => hist.remove(id))
-  const sentinel = useSentinel(hist.more, !!hist.next && genView === 'gallery')
-  const [lb, setLb] = useState<number | null>(null)
-  useEffect(() => { if (lb !== null && lb >= hist.images.length) setLb(hist.images.length ? hist.images.length - 1 : null) }, [hist.images.length])
-
-  // 进行中的任务 + 刚失败的任务，作为骨架/错误格子排在图库最前面
-  const have = new Set(hist.images.map(i => i.id))
-  const recent = Date.now() - 3600e3
-  const pending: Cell[] = favOnly || (isAdmin && scope !== 'me' && scope !== '') ? [] : jobs.flatMap(j => {
-    const active = j.status === 'queued' || j.status === 'running'
-    const waiting = j.status === 'done' && j.images.some(i => !have.has(i.id)) && j.finished_at > Date.now() - 15000
-    const failed = j.status === 'failed' && j.created_at > recent && !dismissed.includes(j.id)
-    if (failed) return [{ kind: 'job' as const, job: j, slot: 0 }]
-    if (!active && !waiting) return []
-    return Array.from({ length: Math.min(j.params?.n || 1, 4) }, (_, slot) => ({ kind: 'job' as const, job: j, slot }))
-  })
-  const cells: Cell[] = [...pending, ...hist.images.map(img => ({ kind: 'img' as const, img }))]
+  const current = jobs.find(j => j.id === sel)
+  useEffect(() => { if (sel && jobs.length && !current && !more) setSel(0) }, [sel, jobs.length, current, more])
 
   if (channelsLoaded && channels.length === 0) {
     return (
@@ -82,65 +94,101 @@ export default function Generate() {
   }
 
   return (
-    <div className="gen">
-      {genView === 'hero' ? (
-        <Hero count={hist.images.length} more={!!hist.next} onShow={() => setGenView('gallery')} />
-      ) : (
-        <section className="gen-gallery">
-          <div className="gal-head">
-            <h1 className="gal-title">作品</h1>
-            <span className="gal-count">{hist.next ? `${hist.images.length}+` : hist.images.length} 张</span>
-            <span className="grow" />
-            {isAdmin && <UserScope value={scope} onChange={setScope} tick={galleryTick} />}
-            <Segmented size="sm" block={false} value={favOnly ? 'fav' : 'all'} onChange={v => setFavOnly(v === 'fav')} options={[{ value: 'all', label: '全部' }, { value: 'fav', label: '已收藏' }]} />
-            <button className="btn btn-secondary btn-sm" onClick={() => setGenView('hero')}><Sparkles size={14} />灵感</button>
-          </div>
-          {hist.loaded && cells.length === 0 ? (
-            <Empty art="frame" title={favOnly ? '还没有收藏' : '还没有作品'} />
-          ) : (
-            <Justified items={cells} keyOf={c => (c.kind === 'img' ? 'i' + c.img.id : `j${c.job.id}-${c.slot}`)}
-              aspect={c => (c.kind === 'img' ? (c.img.width || 1) / (c.img.height || 1) : c.job.status === 'failed' ? 1.4 : aspectNumber(c.job.params?.aspect, c.job.params?.size))}
-              render={c => c.kind === 'img'
-                ? <ImageTile img={c.img} actions={actions} onOpen={() => setLb(hist.images.findIndex(x => x.id === c.img.id))} />
-                : <JobTile job={c.job} onRetry={() => retry(c.job)} onDismiss={() => dismiss(c.job)} />} />
-          )}
-          <div ref={sentinel} className="sentinel">{hist.loading && hist.images.length > 0 && <Spinner />}</div>
-        </section>
+    <div className={`gen gen-split ${jobs.length ? 'has-rail' : ''}`}>
+      {jobs.length > 0 && (
+        <aside className="rail" aria-label="最近生成">
+          <button className={`rail-new ${!current ? 'is-on' : ''}`} onClick={() => setSel(0)} title="新的创作" aria-label="新的创作"><Plus size={20} /></button>
+          {jobs.map(j => <RailItem key={j.id} job={j} on={j.id === sel} onClick={() => setSel(j.id)} />)}
+          <div ref={sentinel} className="rail-end">{more && <Spinner size={16} />}</div>
+          <button className="rail-all" onClick={() => go('assets')} title="打开图库" aria-label="打开图库"><ArrowRight size={16} /></button>
+        </aside>
       )}
+      <div className="gen-main">
+        {current ? <JobView key={current.id} job={current} onRetry={() => retry(current)} onDrop={() => dropJob(current)} onPatch={patchImg} onRemove={removeImg} /> : <Hero />}
+      </div>
       <Composer onJob={onJob} />
-      {lb !== null && hist.images[lb] && <Lightbox list={hist.images} index={lb} onIndex={setLb} onClose={() => setLb(null)} actions={actions} onChange={patch} />}
     </div>
   )
 }
 
-function JobTile({ job, onRetry, onDismiss }: { job: Job; onRetry: () => void; onDismiss: () => void }) {
-  const active = job.status === 'queued' || job.status === 'running'
-  const now = useNow(active)
-  if (job.status === 'failed') return (
-    <div className="tile tile-fail">
-      <AlertTriangle size={20} />
-      <p className="tile-fail-text" data-clamp title={job.error}>{job.error || '生成失败'}</p>
-      <div className="tile-fail-actions">
-        <button className="btn btn-secondary btn-sm" onClick={onRetry}><RotateCw size={14} />重试</button>
-        <button className="icon-btn sm" onClick={onDismiss} aria-label="关闭"><X size={16} /></button>
-      </div>
-    </div>
+function RailItem({ job, on, onClick }: { job: Job; on: boolean; onClick: () => void }) {
+  const first = job.images[0]
+  const failed = job.status === 'failed'
+  return (
+    <button className={`rail-item ${on ? 'is-on' : ''} ${failed ? 'is-fail' : ''}`} onClick={onClick} title={job.prompt} aria-label={job.prompt}>
+      {first ? <img src={first.thumb} alt="" loading="lazy" draggable={false} />
+        : failed ? <AlertTriangle size={18} />
+        : <Spinner size={16} />}
+      {isActive(job) && first && <span className="rail-spin"><Spinner size={14} /></span>}
+      {job.images.length > 1 && <span className="rail-count">{job.images.length}</span>}
+    </button>
   )
-  const elapsed = active && job.started_at ? now - job.started_at : job.duration_ms
+}
+
+function JobView({ job, onRetry, onDrop, onPatch, onRemove }: {
+  job: Job; onRetry: () => void; onDrop: () => void; onPatch: (img: Img) => void; onRemove: (id: number) => void
+}) {
+  const [lb, setLb] = useState<number | null>(null)
+  const actions = useImageActions(onPatch, onRemove)
+  const active = isActive(job)
+  const n = Math.max(1, Math.min(job.params?.n || 1, 8))
+  const slots = active ? Math.max(0, n - job.images.length) : 0
+  const count = job.images.length + slots
+  const ar = aspectNumber(job.params?.aspect, job.params?.size)
+  useEffect(() => { if (lb !== null && lb >= job.images.length) setLb(job.images.length ? job.images.length - 1 : null) }, [job.images.length])
+
+  return (
+    <section className="jv">
+      <header className="jv-head">
+        <p className="jv-prompt" data-clamp title={job.prompt}>{job.prompt}</p>
+        <div className="jv-meta">
+          <span>{job.model}</span>
+          <span>{fmtTime(job.created_at)}</span>
+          {job.status === 'done' && job.duration_ms > 0 && <span>{fmtDuration(job.duration_ms)}</span>}
+        </div>
+      </header>
+      {job.status === 'failed' ? (
+        <div className="jv-fail">
+          <AlertTriangle size={22} />
+          <p className="jv-fail-text">{job.error || '生成失败'}</p>
+          <div className="jv-fail-actions">
+            <button className="btn btn-primary" onClick={onRetry}><RotateCw size={16} />重试</button>
+            <button className="btn btn-secondary" onClick={onDrop}><Trash2 size={16} />移除</button>
+          </div>
+        </div>
+      ) : (
+        <div className={`jv-grid c${Math.min(count, 4)}`}>
+          {job.images.map((img, i) => (
+            <div key={img.id} className="jv-cell" style={{ aspectRatio: `${img.width || 1} / ${img.height || 1}` }}>
+              <ImageTile img={img} actions={actions} onOpen={() => setLb(i)} />
+            </div>
+          ))}
+          {Array.from({ length: slots }, (_, i) => (
+            <div key={'s' + i} className="jv-cell" style={{ aspectRatio: String(ar || 1) }}><Pending job={job} /></div>
+          ))}
+        </div>
+      )}
+      {lb !== null && job.images[lb] && <Lightbox list={job.images} index={lb} onIndex={setLb} onClose={() => setLb(null)} actions={actions} onChange={onPatch} />}
+    </section>
+  )
+}
+
+function Pending({ job }: { job: Job }) {
+  const now = useNow(true)
+  const elapsed = job.started_at ? now - job.started_at : 0
   return (
     <div className="tile tile-skel">
       <div className="skel-center">
         <Spinner size={20} />
         <span className="skel-time">{job.status === 'queued' ? '排队中' : fmtDuration(elapsed)}</span>
       </div>
-      <span className="skel-model" title={job.model}>{job.model}</span>
     </div>
   )
 }
 
 let heroCache: MarketPrompt[] | null = null
 
-function Hero({ count, more, onShow }: { count: number; more: boolean; onShow: () => void }) {
+function Hero() {
   const [items, setItems] = useState<MarketPrompt[]>(heroCache || [])
   const apply = useApplyMarket()
   useEffect(() => { if (!heroCache) api<MarketPrompt[]>('/api/market/hero').then(x => { heroCache = x; setItems(x) }).catch(() => {}) }, [])
@@ -149,13 +197,13 @@ function Hero({ count, more, onShow }: { count: number; more: boolean; onShow: (
       <h1 className="hero-title">脑海里的画面，<br className="br-sm" />一句话就到眼前。</h1>
       <div className="fan">
         {(items.length ? items : Array.from({ length: 5 }, () => null)).map((p, i) => (
-          <button key={p ? p.id : i} className={`fan-card f${i}`} onClick={() => p && apply(p)} disabled={!p} title={p ? p.title : undefined} aria-label={p ? `套用：${p.title}` : '示例'}>
+          <button key={p ? p.id : i} className={`fan-card f${i}`} onClick={() => p && apply(p)} disabled={!p} aria-label={p ? `套用：${p.title}` : '示例'}>
             {p && <img src={marketImg(p.preview)} alt="" draggable={false} />}
+            {p && <span className="fan-tip">{p.title}</span>}
           </button>
         ))}
       </div>
       <p className="hero-hint">点一张卡片套用它的提示词，再改成你想要的样子</p>
-      {count > 0 && <button className="btn btn-secondary btn-sm hero-more" onClick={onShow}>查看作品<span className="btn-count">{more ? `${count}+` : count}</span><ArrowRight size={14} /></button>}
     </section>
   )
 }
