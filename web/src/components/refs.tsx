@@ -6,6 +6,9 @@ import { useStore } from '../store'
 import { Spinner } from './ui'
 
 /** 参考图上传：拖拽、粘贴、选择文件 */
+const IMG_EXT = /\.(png|jpe?g|webp|gif|heic|heif|avif|bmp|tiff?)$/i
+const ACCEPT = 'image/*,.heic,.heif,.avif,.bmp,.tif,.tiff'
+
 export function useRefUpload(refs: RefImg[], onChange: (r: RefImg[]) => void, max: number, pasteEnabled = true) {
   const { toast } = useStore()
   const input = useRef<HTMLInputElement | null>(null)
@@ -14,7 +17,7 @@ export function useRefUpload(refs: RefImg[], onChange: (r: RefImg[]) => void, ma
   refsRef.current = refs
 
   const add = async (files: File[]) => {
-    const imgs = files.filter(f => f.type.startsWith('image/'))
+    const imgs = files.filter(f => f.type.startsWith('image/') || IMG_EXT.test(f.name))
     if (!imgs.length) return
     if (max <= 0) { toast('当前渠道不支持参考图', 'info'); return }
     const room = max - refsRef.current.length
@@ -36,13 +39,13 @@ export function useRefUpload(refs: RefImg[], onChange: (r: RefImg[]) => void, ma
     if (!pasteEnabled) return
     const paste = (e: ClipboardEvent) => {
       const files = Array.from(e.clipboardData?.files || [])
-      if (files.some(f => f.type.startsWith('image/'))) { e.preventDefault(); add(files) }
+      if (files.some(f => f.type.startsWith('image/') || IMG_EXT.test(f.name))) { e.preventDefault(); add(files) }
     }
     window.addEventListener('paste', paste)
     return () => window.removeEventListener('paste', paste)
   })
 
-  const fileInput = <input ref={input} type="file" accept="image/*" multiple hidden onChange={e => { add(Array.from(e.target.files || [])); e.target.value = '' }} />
+  const fileInput = <input ref={input} type="file" accept={ACCEPT} multiple hidden onChange={e => { add(Array.from(e.target.files || [])); e.target.value = '' }} />
   return { add, busy, pick: () => input.current?.click(), fileInput }
 }
 

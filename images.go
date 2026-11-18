@@ -8,7 +8,7 @@ import (
 	"image"
 	_ "image/gif"
 	"image/jpeg"
-	_ "image/png"
+	"image/png"
 	"io"
 	"log"
 	"net/http"
@@ -21,6 +21,10 @@ import (
 	"github.com/gen2brain/webp"
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
+	_ "golang.org/x/image/bmp"
+	_ "golang.org/x/image/tiff"
+	_ "github.com/gen2brain/heic"
+	_ "github.com/gen2brain/avif"
 )
 
 func sniffFormat(data []byte) (ext, mime string) {
@@ -35,6 +39,31 @@ func sniffFormat(data []byte) (ext, mime string) {
 		return "gif", "image/gif"
 	}
 	return "", ""
+}
+
+func convertRef(data []byte) ([]byte, string, string, error) {
+	src, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, "", "", err
+	}
+	var buf bytes.Buffer
+	if hasAlpha(src) {
+		if err := png.Encode(&buf, src); err != nil {
+			return nil, "", "", err
+		}
+		return buf.Bytes(), "png", "image/png", nil
+	}
+	if err := jpeg.Encode(&buf, src, &jpeg.Options{Quality: 92}); err != nil {
+		return nil, "", "", err
+	}
+	return buf.Bytes(), "jpeg", "image/jpeg", nil
+}
+
+func hasAlpha(img image.Image) bool {
+	if o, ok := img.(interface{ Opaque() bool }); ok {
+		return !o.Opaque()
+	}
+	return false
 }
 
 func randName() string { return newGroupID() + strconv.FormatInt(time.Now().UnixNano()%1e6, 36) }
@@ -115,8 +144,12 @@ func handleRefUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	ext, mime := sniffFormat(data)
 	if ext == "" {
-		httpErr(w, 400, "只支持 PNG / JPEG / WEBP / GIF")
-		return
+		// HEIC / AVIF / BMP / TIFF 等：解码后转成上游通用的 PNG（有透明）或 JPEG
+		data, ext, mime, err = convertRef(data)
+		if err != nil {
+			httpErr(w, 400, "无法识别这张图片，支持 PNG、JPEG、WEBP、GIF、HEIC、AVIF、BMP、TIFF")
+			return
+		}
 	}
 	file := randName() + "." + ext
 	if err := os.WriteFile(filepath.Join(dataDir, "refs", file), data, 0o644); err != nil {
