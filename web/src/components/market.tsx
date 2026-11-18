@@ -9,6 +9,7 @@ import { useStore, type MarketOpen, buildPrompt } from '../store'
 import { builtinTemplates, snippetGroups } from '../data/snippets'
 import { Empty, Modal, Segmented, Select, Spinner, TagInput } from './ui'
 import { useSentinel } from './useImages'
+import { UserScope } from '../pages/Assets'
 import { fmtTime } from '../labels'
 
 type Lang = 'zh-CN' | 'en'
@@ -84,6 +85,7 @@ function MarketTab({ favsOnly }: { favsOnly: boolean }) {
   const [lang, setLang] = useState<Lang>('zh-CN')
   const [cat, setCat] = useState('')
   const [mode, setMode] = useState('')
+  const { isAdmin } = useStore()
   const [nsfw, setNsfw] = useState('safe')
   const [count, setCount] = useState(48)
   const scroller = useRef<HTMLDivElement>(null)
@@ -134,7 +136,7 @@ function MarketTab({ favsOnly }: { favsOnly: boolean }) {
         <Select value={lang} onChange={v => setLang(v as Lang)} options={[{ value: 'zh-CN', label: '中文' }, { value: 'en', label: 'English' }]} />
         <Select value={cat} onChange={setCat} options={[{ value: '', label: '全部分类' }, ...cats.map(c => ({ value: c, label: c }))]} />
         <Select value={mode} onChange={setMode} options={[{ value: '', label: '全部模式' }, { value: 'generate', label: '文生图' }, { value: 'edit', label: '编辑' }]} />
-        <Select value={nsfw} onChange={setNsfw} options={[{ value: 'safe', label: '安全内容' }, { value: 'include', label: '含 NSFW' }, { value: 'only', label: '仅 NSFW' }]} />
+        {isAdmin && <Select value={nsfw} onChange={setNsfw} options={[{ value: 'safe', label: '安全内容' }, { value: 'include', label: '含 NSFW' }, { value: 'only', label: '仅 NSFW' }]} />}
       </div>
       <div className="mk-credit">
         <span className="mk-count">{shown.length} / {pool.length}</span>
@@ -190,23 +192,25 @@ function Highlight({ text }: { text: string }) {
 }
 
 function MineTab() {
-  const { setComposer, toast, closeMarket, go, composer } = useStore()
+  const { setComposer, toast, closeMarket, go, composer, isAdmin, me } = useStore()
+  const [scope, setScope] = useState('me')
   const [list, setList] = useState<PromptItem[]>([])
   const [loaded, setLoaded] = useState(false)
   const [q, setQ] = useState('')
   const [tag, setTag] = useState('')
   const [edit, setEdit] = useState<Partial<PromptItem> | null>(null)
   const file = useRef<HTMLInputElement>(null)
-  const reload = () => api<PromptItem[]>('/api/prompts').then(l => { setList(l); setLoaded(true) })
-  useEffect(() => { reload().catch(() => setLoaded(true)) }, [])
+  const reload = () => api<PromptItem[]>('/api/prompts' + (isAdmin && scope !== 'me' ? '?user=' + (scope || 'all') : '')).then(l => { setList(l); setLoaded(true) })
+  useEffect(() => { reload().catch(() => setLoaded(true)) }, [scope])
+  const mine = (p: PromptItem) => !p.user_id || p.user_id === me?.id
   const tags = useMemo(() => Array.from(new Set(list.flatMap(p => p.tags))), [list])
   const kw = q.trim()
   const shown = list.filter(p => (!tag || p.tags.includes(tag)) && (!kw || p.title.includes(kw) || p.content.includes(kw) || p.tags.some(t => t.includes(kw))))
   const tpls = builtinTemplates.filter(t => !kw || t.name.includes(kw) || t.content.includes(kw))
 
-  const use = (content: string, id?: number) => {
+  const use = (content: string, id?: number, own = true) => {
     setComposer({ text: content, chips: [], vars: {} })
-    if (id) api(`/api/prompts/${id}/use`, { method: 'POST' }).catch(() => {})
+    if (id && own) api(`/api/prompts/${id}/use`, { method: 'POST' }).catch(() => {})
     closeMarket(); go('generate'); toast('已套用提示词')
   }
   const pin = async (p: PromptItem) => { await api(`/api/prompts/${p.id}`, { method: 'PUT', body: { ...p, pinned: !p.pinned } }); reload() }
@@ -237,6 +241,7 @@ function MineTab() {
     <>
       <div className="mk-filters mk-filters-mine">
         <div className="search mk-search"><Search size={16} /><input value={q} onChange={e => setQ(e.target.value)} placeholder="搜索标题、内容或标签" /></div>
+        {isAdmin && <UserScope value={scope} onChange={setScope} noCount />}
         <button className="btn btn-secondary" onClick={() => file.current?.click()}><Upload size={16} /><span className="hide-xs">导入</span></button>
         <a className="btn btn-secondary" href="/api/prompts/export"><Download size={16} /><span className="hide-xs">导出</span></a>
         {current.trim() && <button className="btn btn-secondary" onClick={() => setEdit({ title: '', content: current, tags: [] })}><BookmarkPlus size={16} /><span className="hide-xs">存当前</span></button>}
@@ -258,15 +263,15 @@ function MineTab() {
                 <div className="pcard-head">
                   <h4 className="pcard-title" title={p.title}>{p.title}</h4>
                   {p.is_template && <span className="badge">模板</span>}
-                  <button className={`icon-btn sm ${p.pinned ? 'is-star' : ''}`} onClick={() => pin(p)} title={p.pinned ? '取消置顶' : '置顶'} aria-label="置顶"><Pin size={16} /></button>
+                  {mine(p) && <button className={`icon-btn sm ${p.pinned ? 'is-star' : ''}`} onClick={() => pin(p)} title={p.pinned ? '取消置顶' : '置顶'} aria-label="置顶"><Pin size={16} /></button>}
                 </div>
                 <p className="pcard-text" data-clamp><Highlight text={p.content} /></p>
-                <div className="pcard-tags">{p.tags.map(t => <span key={t} className="tag-mini">{t}</span>)}<span className="pcard-uses">用过 {p.use_count} 次</span></div>
+                <div className="pcard-tags">{p.tags.map(t => <span key={t} className="tag-mini">{t}</span>)}<span className="pcard-uses">{p.owner && !mine(p) ? `${p.owner} · ` : ''}用过 {p.use_count} 次</span></div>
                 <div className="mcard-foot">
-                  <button className="icon-btn sm" onClick={() => setEdit(p)} aria-label="编辑" title="编辑"><Pencil size={16} /></button>
+                  {mine(p) && <button className="icon-btn sm" onClick={() => setEdit(p)} aria-label="编辑" title="编辑"><Pencil size={16} /></button>}
                   <button className="icon-btn sm is-danger" onClick={() => del(p)} aria-label="删除" title="删除"><Trash2 size={16} /></button>
                   <span className="grow" />
-                  <button className="btn btn-primary btn-sm" onClick={() => use(p.content, p.id)}>套用</button>
+                  <button className="btn btn-primary btn-sm" onClick={() => use(p.content, p.id, mine(p))}>套用</button>
                 </div>
               </article>
             ))}

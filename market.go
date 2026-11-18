@@ -67,13 +67,13 @@ var (
 	marketMu      sync.RWMutex
 	marketItems   []MarketPrompt
 	marketAllowed map[string]bool
+	marketSafe    map[string]bool // 只属于非 NSFW 条目的图片
 	marketLoaded  bool
 	marketFetchMu sync.Mutex
 )
 
 const marketSchema = `
 CREATE TABLE IF NOT EXISTS market_prompts (id TEXT PRIMARY KEY, seq INTEGER NOT NULL, data TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS market_favs (id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at INTEGER NOT NULL);
 `
 
 func marketInit() error {
@@ -86,30 +86,23 @@ func marketInit() error {
 
 func setMarket(items []MarketPrompt) {
 	allowed := map[string]bool{}
+	safe := map[string]bool{}
 	for _, it := range items {
 		allowed[it.Preview] = true
+		if !it.NSFW {
+			safe[it.Preview] = true
+		}
 		for _, u := range it.RefURLs {
 			allowed[u] = true
-		}
-	}
-	// 收藏里的条目即使已从源中移除，图片也允许读取
-	rows, err := db.Query(`SELECT data FROM market_favs`)
-	if err == nil {
-		for rows.Next() {
-			var s string
-			var p MarketPrompt
-			if rows.Scan(&s) == nil && json.Unmarshal([]byte(s), &p) == nil {
-				allowed[p.Preview] = true
-				for _, u := range p.RefURLs {
-					allowed[u] = true
-				}
+			if !it.NSFW {
+				safe[u] = true
 			}
 		}
-		rows.Close()
 	}
 	marketMu.Lock()
 	marketItems = items
 	marketAllowed = allowed
+	marketSafe = safe
 	marketLoaded = true
 	marketMu.Unlock()
 }
@@ -399,10 +392,25 @@ func ensureMarket(ctx context.Context) error {
 	return nil
 }
 
-func marketState() map[string]any {
+// visibleMarket 普通用户看不到 NSFW 条目（连同 NSFW 分类）
+func visibleMarket(u *User) []MarketPrompt {
 	marketMu.RLock()
 	items := marketItems
 	marketMu.RUnlock()
+	if u.NSFW {
+		return items
+	}
+	out := make([]MarketPrompt, 0, len(items))
+	for _, it := range items {
+		if !it.NSFW && !strings.EqualFold(it.Category, "NSFW") {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+func marketState(u *User) map[string]any {
+	items := visibleMarket(u)
 	var at int64
 	fmt.Sscan(getSetting("market_fetched_at", "0"), &at)
 	return map[string]any{
@@ -421,7 +429,7 @@ func handleMarketList(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 502, err.Error())
 		return
 	}
-	writeJSON(w, marketState())
+	writeJSON(w, marketState(cur(r)))
 }
 
 func handleMarketRefresh(w http.ResponseWriter, r *http.Request) {
@@ -431,13 +439,14 @@ func handleMarketRefresh(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 502, err.Error())
 		return
 	}
-	writeJSON(w, marketState())
+	writeJSON(w, marketState(cur(r)))
 }
 
 // ---------- 收藏 ----------
 
 func handleMarketFavList(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query(`SELECT data FROM market_favs ORDER BY created_at DESC`)
+	u := cur(r)
+	rows, err := db.Query(`SELECT data FROM market_user_favs WHERE user_id=? ORDER BY created_at DESC`, u.ID)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
@@ -447,7 +456,7 @@ func handleMarketFavList(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var s string
 		var p MarketPrompt
-		if rows.Scan(&s) == nil && json.Unmarshal([]byte(s), &p) == nil {
+		if rows.Scan(&s) == nil && json.Unmarshal([]byte(s), &p) == nil && (u.NSFW || !p.NSFW) {
 			out = append(out, p)
 		}
 	}
@@ -471,11 +480,11 @@ func handleMarketFavAdd(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	marketMu.RUnlock()
-	if found == nil {
+	if found == nil || (found.NSFW && !cur(r).NSFW) {
 		httpErr(w, 404, "条目不存在")
 		return
 	}
-	_, err := db.Exec(`INSERT INTO market_favs(id,data,created_at) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data`, found.ID, mustJSON(found), now())
+	_, err := db.Exec(`INSERT INTO market_user_favs(user_id,id,data,created_at) VALUES(?,?,?,?) ON CONFLICT(user_id,id) DO UPDATE SET data=excluded.data`, cur(r).ID, found.ID, mustJSON(found), now())
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
@@ -491,21 +500,30 @@ func handleMarketFavDel(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "参数错误")
 		return
 	}
-	_, _ = db.Exec(`DELETE FROM market_favs WHERE id=?`, p.ID)
+	_, _ = db.Exec(`DELETE FROM market_user_favs WHERE user_id=? AND id=?`, cur(r).ID, p.ID)
 	writeJSON(w, map[string]any{"ok": true})
 }
 
 // ---------- 图片代理与缓存 ----------
 
-func marketURLAllowed(u string) bool {
+// marketURLAllowed 只代理市场里出现过的图片；普通用户不能读 NSFW 条目的图
+func marketURLAllowed(user *User, u string) bool {
 	marketMu.RLock()
 	ok := marketAllowed[u]
+	if !user.NSFW {
+		ok = marketSafe[u]
+	}
 	marketMu.RUnlock()
 	if ok {
 		return true
 	}
+	// 收藏里的条目即使已从源中移除，图片也允许读取
 	var n int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM market_favs WHERE data LIKE ?`, "%"+u+"%").Scan(&n)
+	q := `SELECT COUNT(*) FROM market_user_favs WHERE user_id=? AND instr(data, ?) > 0`
+	if !user.NSFW {
+		q += ` AND instr(data, '"nsfw":true') = 0`
+	}
+	_ = db.QueryRow(q, user.ID, u).Scan(&n)
 	return n > 0
 }
 
@@ -578,7 +596,7 @@ func cachedMarketImage(ctx context.Context, u string) (string, error) {
 func handleMarketImg(w http.ResponseWriter, r *http.Request) {
 	u := r.URL.Query().Get("u")
 	_ = ensureMarket(r.Context())
-	if u == "" || !marketURLAllowed(u) {
+	if u == "" || !marketURLAllowed(cur(r), u) {
 		httpErr(w, 404, "图片不存在")
 		return
 	}
@@ -603,7 +621,7 @@ func handleRefFromURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = ensureMarket(r.Context())
-	if !marketURLAllowed(p.URL) {
+	if !marketURLAllowed(cur(r), p.URL) {
 		httpErr(w, 400, "只能导入提示词市场里的参考图")
 		return
 	}
@@ -624,7 +642,7 @@ func handleRefFromURL(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 500, err.Error())
 		return
 	}
-	res, err := db.Exec(`INSERT INTO refs(file,mime,created_at) VALUES(?,?,?)`, file, mime, now())
+	res, err := db.Exec(`INSERT INTO refs(file,mime,created_at,user_id) VALUES(?,?,?,?)`, file, mime, now(), cur(r).ID)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return

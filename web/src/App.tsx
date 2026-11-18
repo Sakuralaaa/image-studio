@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Sun, Moon, ArrowRight, LogOut } from 'lucide-react'
-import { api, setUnauthorizedHandler } from './api'
+import { api, setUnauthorizedHandler, type MeInfo } from './api'
 import { StoreProvider, useStore, type Route } from './store'
 import Generate from './pages/Generate'
 import Compare from './pages/Compare'
@@ -17,14 +17,15 @@ const nav: { r: Route; label: string }[] = [
 ]
 
 export default function App() {
-  const [state, setState] = useState<'loading' | 'login' | 'ok'>('loading')
+  const [info, setInfo] = useState<MeInfo | null>(null)
+  const load = () => api<MeInfo>('/api/me').then(setInfo).catch(() => setInfo({ authed: false, register_mode: 'closed', version: '' }))
   useEffect(() => {
-    setUnauthorizedHandler(() => setState('login'))
-    api<{ authed: boolean }>('/api/me').then(r => setState(r.authed ? 'ok' : 'login')).catch(() => setState('login'))
+    setUnauthorizedHandler(() => setInfo(i => (i ? { ...i, authed: false } : i)))
+    load()
   }, [])
-  if (state === 'loading') return <div className="boot"><Spinner size={20} /></div>
-  if (state === 'login') return <Login onOk={() => setState('ok')} />
-  return <StoreProvider><Shell /></StoreProvider>
+  if (!info) return <div className="boot"><Spinner size={20} /></div>
+  if (!info.authed) return <Login mode={info.register_mode} onOk={load} />
+  return <StoreProvider key={info.user?.id} info={info}><Shell /></StoreProvider>
 }
 
 export function Seal({ size = 28 }: { size?: number }) {
@@ -69,23 +70,38 @@ function Shell() {
   )
 }
 
-function Login({ onOk }: { onOk: () => void }) {
+function Login({ mode, onOk }: { mode: MeInfo['register_mode']; onOk: () => void }) {
+  const [reg, setReg] = useState(false)
+  const [name, setName] = useState('')
   const [pw, setPw] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [code, setCode] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const canReg = mode !== 'closed'
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (reg && pw !== pw2) { setErr('两次输入的密码不一致'); return }
     setBusy(true); setErr('')
-    try { await api('/api/login', { body: { password: pw } }); onOk() } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+    try {
+      if (reg) await api('/api/register', { body: { username: name.trim(), password: pw, invite: code.trim().toUpperCase() } })
+      else await api('/api/login', { body: { username: name.trim(), password: pw } })
+      onOk()
+    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
+  const ready = name.trim() && pw && (!reg || (pw2 && (mode !== 'invite' || code.trim())))
   return (
     <div className="login">
       <form className="login-card" onSubmit={submit}>
         <Seal size={48} />
         <h1>影室</h1>
-        <input className="input" type="password" autoFocus placeholder="管理员密码" value={pw} onChange={e => setPw(e.target.value)} />
+        <input className="input" autoFocus autoComplete="username" placeholder="用户名" value={name} onChange={e => setName(e.target.value)} />
+        <input className="input" type="password" autoComplete={reg ? 'new-password' : 'current-password'} placeholder="密码" value={pw} onChange={e => setPw(e.target.value)} />
+        {reg && <input className="input" type="password" autoComplete="new-password" placeholder="确认密码" value={pw2} onChange={e => setPw2(e.target.value)} />}
+        {reg && mode === 'invite' && <input className="input input-code" placeholder="邀请码" value={code} onChange={e => setCode(e.target.value)} />}
         {err && <div className="login-err">{err}</div>}
-        <button className="btn btn-primary btn-block" disabled={busy || !pw}>{busy ? <Spinner /> : <>进入<ArrowRight size={16} /></>}</button>
+        <button className="btn btn-primary btn-block" disabled={busy || !ready}>{busy ? <Spinner /> : <>{reg ? '注册' : '登录'}<ArrowRight size={16} /></>}</button>
+        {canReg && <button type="button" className="login-switch" onClick={() => { setReg(!reg); setErr('') }}>{reg ? '已有账号，去登录' : '没有账号？注册'}</button>}
       </form>
     </div>
   )

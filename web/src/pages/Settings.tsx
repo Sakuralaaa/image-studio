@@ -1,19 +1,26 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Pencil, Trash2, Plug, RefreshCw, Check, Search, Route as RouteIcon, LogOut, Sun, Moon, Monitor, KeyRound, ArrowUp, ArrowDown, X } from 'lucide-react'
+import { Plus, Pencil, Trash2, Plug, RefreshCw, Check, Search, Route as RouteIcon, KeyRound, Lock, ArrowUp, ArrowDown, X } from 'lucide-react'
 import { api, type Cap, type Caps, type Channel, type Preset } from '../api'
-import { useStore, type ThemePref } from '../store'
+import { useStore } from '../store'
 import { Empty, Modal, Segmented, Select, Spinner, TagInput } from '../components/ui'
 import { PageHead } from './Compare'
-import { apiTypeLabels, capLabels, fmtBytes, modeLabels, valueLabel } from '../labels'
+import { Invites, Personal, System, Users } from './Admin'
+import { apiTypeLabels, capLabels, modeLabels, valueLabel } from '../labels'
+
+type Tab = 'channels' | 'users' | 'invites' | 'system' | 'me'
+const tabs: { value: Tab; label: string }[] = [{ value: 'channels', label: '渠道' }, { value: 'users', label: '用户' }, { value: 'invites', label: '邀请码' }, { value: 'system', label: '系统' }, { value: 'me', label: '个人' }]
 
 export default function Settings() {
-  const [tab, setTab] = useState<'channels' | 'general'>('channels')
+  const { isAdmin } = useStore()
+  const [tab, setTab] = useState<Tab>(() => (isAdmin ? ((sessionStorage.getItem('studio.settab') as Tab) || 'channels') : 'me'))
+  const pick = (t: Tab) => { sessionStorage.setItem('studio.settab', t); setTab(t) }
+  if (!isAdmin) return <div className="page page-settings"><PageHead title="设置" /><Personal /></div>
   return (
     <div className="page page-settings">
       <PageHead title="设置">
-        <Segmented block={false} value={tab} onChange={v => setTab(v as any)} options={[{ value: 'channels', label: '渠道' }, { value: 'general', label: '通用' }]} />
+        <Segmented block={false} value={tab} onChange={v => pick(v as Tab)} options={tabs} />
       </PageHead>
-      {tab === 'channels' ? <Channels /> : <General />}
+      {tab === 'channels' ? <Channels /> : tab === 'users' ? <Users /> : tab === 'invites' ? <Invites /> : tab === 'system' ? <System /> : <Personal />}
     </div>
   )
 }
@@ -57,6 +64,7 @@ function Channels() {
                 <span className="mini-tag">{apiTypeLabels[c.api_type]}</span>
                 <span className="mini-tag">{c.models.length} 个模型</span>
                 {c.key_tail && <span className="mini-tag"><KeyRound size={12} />{c.key_tail}</span>}
+                {c.hidden && <span className="mini-tag"><Lock size={12} />仅管理员</span>}
                 {c.tool_path_at > 0 && <span className="mini-tag is-warn"><RouteIcon size={12} />对话工具链路</span>}
               </div>
               <CapSummary caps={c.caps} />
@@ -172,6 +180,9 @@ function ChannelEditor({ initial, onClose, onSaved }: { initial: Partial<Channel
           <Segmented value={ch.api_type || 'images'} onChange={v => setCh({ ...ch, api_type: v as any })} options={[{ value: 'images', label: apiTypeLabels.images }, { value: 'chat', label: apiTypeLabels.chat }]} />
         </div>
         <label className="field span-2"><span className="field-label">接口地址</span><input className="input" value={ch.base_url || ''} onChange={e => setCh({ ...ch, base_url: e.target.value })} placeholder="https://example.com/v1" /></label>
+        <div className="field span-2 field-inline"><span className="field-label">谁能用</span>
+          <Segmented block={false} value={ch.hidden ? 'admin' : 'all'} onChange={v => setCh({ ...ch, hidden: v === 'admin' })} options={[{ value: 'all', label: '所有用户' }, { value: 'admin', label: '仅管理员' }]} />
+        </div>
         <label className="field span-2"><span className="field-label">密钥</span>
           <input className="input" type="password" autoComplete="new-password" value={ch.api_key || ''} onChange={e => setCh({ ...ch, api_key: e.target.value })} placeholder={initial.key_tail ? `已保存 ${initial.key_tail}，留空不修改` : 'sk-…'} />
         </label>
@@ -225,7 +236,7 @@ function ChannelEditor({ initial, onClose, onSaved }: { initial: Partial<Channel
                     </div>
                   )}
                   {!off && (k === 'n' || k === 'refs') && (
-                    <label className="cap-max"><span>上限</span><input className="input" type="number" min={k === 'n' ? 1 : 0} max={16} value={cap.max ?? 0} onChange={e => setCap(k, { max: Number(e.target.value) })} /></label>
+                    <label className="cap-max"><span>上限</span><input className="input" type="number" min={k === 'n' ? 1 : 0} max={k === 'n' ? 16 : 32} value={cap.max ?? 0} onChange={e => setCap(k, { max: Number(e.target.value) })} /></label>
                   )}
                   {!off && k === 'response' && (
                     <Segmented size="sm" value={cap.values?.[0] || 'url'} onChange={v => setCap(k, { values: [v] })} options={[{ value: 'url', label: '链接' }, { value: 'b64_json', label: '内嵌数据' }]} />
@@ -237,61 +248,5 @@ function ChannelEditor({ initial, onClose, onSaved }: { initial: Partial<Channel
         </div>
       </div>
     </Modal>
-  )
-}
-
-function General() {
-  const { theme, setTheme, toast } = useStore()
-  const [s, setS] = useState<{ retention_days: number; images: number; favorites: number; bytes: number; version: string } | null>(null)
-  const [days, setDays] = useState('0')
-  const load = () => api('/api/settings').then(x => { setS(x); setDays(String(x.retention_days)) })
-  useEffect(() => { load().catch(() => {}) }, [])
-  const save = async (clean = false) => {
-    const res = await api<{ removed: number }>('/api/settings', { method: 'PUT', body: { retention_days: Math.max(0, Number(days) || 0), clean_now: clean } })
-    toast(clean ? `已清理 ${res.removed} 张` : '已保存')
-    load()
-  }
-  const logout = async () => { await api('/api/logout', { method: 'POST' }); location.reload() }
-  const themes: { v: ThemePref; label: string; icon: any }[] = [{ v: 'system', label: '跟随系统', icon: Monitor }, { v: 'light', label: '浅色', icon: Sun }, { v: 'dark', label: '深色', icon: Moon }]
-  return (
-    <div className="general">
-      <section className="card gcard">
-        <h3>外观</h3>
-        <div className="theme-pick">
-          {themes.map(t => (
-            <button key={t.v} className={`theme-opt t-${t.v} ${theme === t.v ? 'is-on' : ''}`} onClick={() => setTheme(t.v)}>
-              <span className="theme-swatch"><i /><i /><i /></span>
-              <span className="theme-label"><t.icon size={14} />{t.label}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-      <section className="card gcard">
-        <h3>历史清理</h3>
-        <div className="g-row">
-          <span>未收藏的历史图片保留</span>
-          <div className="num-input"><input className="input" type="number" min={0} value={days} onChange={e => setDays(e.target.value)} /><span>天</span></div>
-          {Number(days) <= 0 && <span className="muted">当前不清理</span>}
-          <span className="grow" />
-          <button className="btn btn-secondary" onClick={() => save(false)}>保存</button>
-          {Number(days) > 0 && <button className="btn btn-secondary" onClick={() => save(true)}>立即清理</button>}
-        </div>
-        {s && (
-          <div className="stats">
-            <div><b>{s.images}</b><span>全部图片</span></div>
-            <div><b>{s.favorites}</b><span>资产</span></div>
-            <div><b>{fmtBytes(s.bytes)}</b><span>原图占用</span></div>
-          </div>
-        )}
-      </section>
-      <section className="card gcard">
-        <h3>账户</h3>
-        <div className="g-row">
-          <span className="muted">版本 {s?.version || ''}</span>
-          <span className="grow" />
-          <button className="btn btn-secondary" onClick={logout}><LogOut size={16} />退出登录</button>
-        </div>
-      </section>
-    </div>
   )
 }

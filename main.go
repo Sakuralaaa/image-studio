@@ -1,10 +1,7 @@
 package main
 
 import (
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -17,13 +14,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	_ "time/tzdata"
 )
 
 //go:embed all:web/dist
 var webFS embed.FS
 
 var (
-	version   = "0.2.0"
+	version   = "0.3.0"
 	dataDir   string
 	adminPass string
 	secret    []byte
@@ -44,6 +42,9 @@ func main() {
 	if err := marketInit(); err != nil {
 		log.Fatal(err)
 	}
+	if err := migrateUsers(); err != nil {
+		log.Fatal(err)
+	}
 	s := getSetting("session_secret", "")
 	if s == "" {
 		b := make([]byte, 32)
@@ -51,10 +52,7 @@ func main() {
 		s = hex.EncodeToString(b)
 		_ = setSetting("session_secret", s)
 	}
-	secret = []byte(s + "|" + adminPass)
-	if adminPass == "" {
-		log.Println("警告：未设置 ADMIN_PASSWORD，任何人都可以访问")
-	}
+	secret = []byte(s)
 	go cleanupLoop()
 
 	mux := http.NewServeMux()
@@ -79,28 +77,34 @@ func routes(m *http.ServeMux) {
 	m.HandleFunc("POST /api/logout", handleLogout)
 	m.HandleFunc("GET /api/me", handleMe)
 
+	m.HandleFunc("POST /api/register", handleRegister)
+
 	a := func(p string, h http.HandlerFunc) { m.Handle(p, auth(h)) }
-	a("GET /api/presets", handlePresets)
+	ad := func(p string, h http.HandlerFunc) { m.Handle(p, adminOnly(h)) }
+	a("PUT /api/account", handleAccountPut)
+
+	// 渠道：管理员可增删改；普通用户只拿到去掉名称和地址的模型列表
+	ad("GET /api/presets", handlePresets)
 	a("GET /api/channels", handleChannelList)
-	a("POST /api/channels", handleChannelSave)
-	a("PUT /api/channels/{id}", handleChannelSave)
-	a("DELETE /api/channels/{id}", handleChannelDelete)
-	a("POST /api/channels/probe", handleChannelProbe)
-	a("POST /api/channels/order", handleChannelOrder)
+	ad("POST /api/channels", handleChannelSave)
+	ad("PUT /api/channels/{id}", handleChannelSave)
+	ad("DELETE /api/channels/{id}", handleChannelDelete)
+	ad("POST /api/channels/probe", handleChannelProbe)
+	ad("POST /api/channels/order", handleChannelOrder)
 
 	a("POST /api/refs", handleRefUpload)
 	a("POST /api/refs/url", handleRefFromURL)
 
 	a("GET /api/market", handleMarketList)
-	a("POST /api/market/refresh", handleMarketRefresh)
+	ad("POST /api/market/refresh", handleMarketRefresh)
 	a("GET /api/market/img", handleMarketImg)
 	a("GET /api/market/hero", handleHero)
 	a("GET /api/market/favs", handleMarketFavList)
 	a("POST /api/market/favs", handleMarketFavAdd)
 	a("POST /api/market/favs/delete", handleMarketFavDel)
-	a("GET /files/refs/{name}", serveDir("refs"))
-	a("GET /files/images/{name}", serveDir("images"))
-	a("GET /files/thumbs/{name}", serveDir("thumbs"))
+	a("GET /files/refs/{name}", serveOwned("refs"))
+	a("GET /files/images/{name}", serveOwned("images"))
+	a("GET /files/thumbs/{name}", serveOwned("thumbs"))
 
 	a("POST /api/jobs", handleJobCreate)
 	a("GET /api/jobs", handleJobList)
@@ -127,8 +131,15 @@ func routes(m *http.ServeMux) {
 	a("GET /api/prompts/export", handlePromptExport)
 	a("POST /api/prompts/import", handlePromptImport)
 
-	a("GET /api/settings", handleSettingsGet)
-	a("PUT /api/settings", handleSettingsPut)
+	ad("GET /api/settings", handleSystemGet)
+	ad("PUT /api/settings", handleSystemPut)
+	ad("GET /api/users", handleUserList)
+	ad("POST /api/users", handleUserCreate)
+	ad("PUT /api/users/{id}", handleUserUpdate)
+	ad("DELETE /api/users/{id}", handleUserDelete)
+	ad("GET /api/invites", handleInviteList)
+	ad("POST /api/invites", handleInviteCreate)
+	ad("DELETE /api/invites/{code}", handleInviteDelete)
 
 	sub, _ := fs.Sub(webFS, "web/dist")
 	fileServer := http.FileServer(http.FS(sub))
@@ -158,70 +169,7 @@ func routes(m *http.ServeMux) {
 	})
 }
 
-// ---------- 会话 ----------
-
 const cookieName = "studio_session"
-
-func sign(exp int64) string {
-	msg := strconv.FormatInt(exp, 10)
-	h := hmac.New(sha256.New, secret)
-	h.Write([]byte(msg))
-	return msg + "." + hex.EncodeToString(h.Sum(nil))
-}
-
-func validSession(r *http.Request) bool {
-	if adminPass == "" {
-		return true
-	}
-	c, err := r.Cookie(cookieName)
-	if err != nil {
-		return false
-	}
-	parts := strings.SplitN(c.Value, ".", 2)
-	if len(parts) != 2 {
-		return false
-	}
-	exp, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || exp < time.Now().Unix() {
-		return false
-	}
-	return hmac.Equal([]byte(sign(exp)), []byte(c.Value))
-}
-
-func auth(h http.HandlerFunc) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !validSession(r) {
-			httpErr(w, 401, "请先登录")
-			return
-		}
-		h(w, r)
-	})
-}
-
-func handleLogin(w http.ResponseWriter, r *http.Request) {
-	var body struct{ Password string }
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpErr(w, 400, "请求格式错误")
-		return
-	}
-	if adminPass != "" && subtle.ConstantTimeCompare([]byte(body.Password), []byte(adminPass)) != 1 {
-		time.Sleep(600 * time.Millisecond)
-		httpErr(w, 401, "密码不正确")
-		return
-	}
-	exp := time.Now().Add(30 * 24 * time.Hour).Unix()
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: sign(exp), Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: time.Unix(exp, 0), Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"})
-	writeJSON(w, map[string]any{"ok": true})
-}
-
-func handleLogout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1})
-	writeJSON(w, map[string]any{"ok": true})
-}
-
-func handleMe(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{"authed": validSession(r), "needPassword": adminPass != "", "version": version})
-}
 
 // ---------- 工具 ----------
 
@@ -249,12 +197,29 @@ func pathID(r *http.Request) int64 {
 	return id
 }
 
-func serveDir(sub string) http.HandlerFunc {
+// serveOwned 只允许读取自己的文件；管理员可以读全部
+func serveOwned(sub string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := filepath.Base(r.PathValue("name"))
 		if name == "." || strings.Contains(name, "..") {
 			http.NotFound(w, r)
 			return
+		}
+		u := cur(r)
+		if !u.IsAdmin() {
+			var owner int64 = -1
+			switch sub {
+			case "images":
+				_ = db.QueryRow(`SELECT user_id FROM images WHERE file=?`, name).Scan(&owner)
+			case "thumbs":
+				_ = db.QueryRow(`SELECT user_id FROM images WHERE thumb=?`, name).Scan(&owner)
+			case "refs":
+				_ = db.QueryRow(`SELECT user_id FROM refs WHERE file=?`, name).Scan(&owner)
+			}
+			if owner != u.ID {
+				http.NotFound(w, r)
+				return
+			}
 		}
 		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 		http.ServeFile(w, r, filepath.Join(dataDir, sub, name))

@@ -8,7 +8,7 @@ import { ParamControls, normalizeParams, paramSummary } from './params'
 import { RefThumbs, useRefUpload } from './refs'
 
 export function Composer({ onJob }: { onJob: (j: Job) => void }) {
-  const { channels, composer, setComposer, finalPrompt, toast, openMarket, go } = useStore()
+  const { channels, composer, setComposer, finalPrompt, toast, openMarket, go, isAdmin, quota, reloadMe } = useStore()
   const channel = channels.find(c => c.id === composer.channelId)
   const [submitting, setSubmitting] = useState(false)
   const [pop, setPop] = useState<'' | 'model' | 'params'>('')
@@ -49,14 +49,15 @@ export function Composer({ onJob }: { onJob: (j: Job) => void }) {
   }, [])
 
   const submit = async () => {
-    if (!channel) { toast('请先添加渠道', 'info'); go('settings'); return }
+    if (!channel) { if (isAdmin) { toast('请先添加渠道', 'info'); go('settings') } else toast('暂无可用模型', 'info'); return }
     if (!finalPrompt.trim()) { toast('先写点提示词', 'info'); ta.current?.focus(); return }
     setSubmitting(true)
     try {
       const job = await api<Job>('/api/jobs', { body: { channel_id: channel.id, model: composer.model, prompt: finalPrompt, params: composer.params, refs: composer.refs.slice(0, refMax).map(r => r.id) } })
       onJob(job)
       setPop('')
-    } catch (e: any) { toast(e.message, 'err') }
+      reloadMe()
+    } catch (e: any) { toast(e.message, 'err'); reloadMe() }
     finally { setSubmitting(false) }
   }
 
@@ -109,6 +110,7 @@ export function Composer({ onJob }: { onJob: (j: Job) => void }) {
             <SlidersHorizontal size={14} /><span className="pill-text">{paramSummary(channel, composer.params)}</span>
           </button>
           <span className="grow" />
+          {quota && !quota.unlimited && <span className={`quota-left ${quota.remaining <= 0 ? 'is-out' : ''}`} title="今日剩余额度">剩 {quota.remaining}</span>}
           {hasText && <button className="icon-btn sm" onClick={() => setComposer({ text: '', chips: [], vars: {} })} aria-label="清空" title="清空"><Eraser size={16} /></button>}
           <button className="send" onClick={submit} disabled={submitting} aria-label="生成" title="生成（⌘↵）">
             {submitting ? <Spinner size={14} /> : <ArrowUp size={18} strokeWidth={2.4} />}
@@ -118,10 +120,10 @@ export function Composer({ onJob }: { onJob: (j: Job) => void }) {
       </div>
 
       <Pop anchor={modelRef} open={pop === 'model'} onClose={() => setPop('')} width={300}>
-        <div className="mpick">
+        <div className={`mpick ${isAdmin ? "" : "is-flat"}`}>
           {channels.map(ch => (
             <div key={ch.id} className="mpick-group">
-              <div className="mpick-head">{ch.name}</div>
+              {isAdmin && <div className="mpick-head">{ch.name}{ch.hidden ? ' · 仅管理员' : ''}</div>}
               {ch.models.map(m => {
                 const sel = composer.channelId === ch.id && composer.model === m
                 return (
@@ -132,9 +134,9 @@ export function Composer({ onJob }: { onJob: (j: Job) => void }) {
               })}
             </div>
           ))}
-          <div className="mpick-foot">
+          {isAdmin && <div className="mpick-foot">
             <button className="menu-item" onClick={() => { setPop(''); go('settings') }}><Settings2 size={14} /><span className="menu-label">管理渠道</span></button>
-          </div>
+          </div>}
         </div>
       </Pop>
       <Pop anchor={paramRef} open={pop === 'params'} onClose={() => setPop('')} width={400}>

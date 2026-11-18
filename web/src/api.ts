@@ -7,7 +7,7 @@ export interface Caps {
 export interface Channel {
   id: number; name: string; base_url: string; api_key?: string; key_tail: string
   api_type: 'images' | 'chat'; models: string[]; caps: Caps; sort: number
-  tool_path_at: number; created_at: number
+  tool_path_at: number; created_at: number; hidden?: boolean
 }
 export interface Preset { key: string; name: string; base_url: string; api_type: 'images' | 'chat'; models: string[] | null; caps: Caps }
 export interface Params {
@@ -23,6 +23,7 @@ export interface Img {
   id: number; job_id: number; url: string; thumb: string; width: number; height: number
   bytes: number; format: string; favorite: boolean; fav_at: number; album: string
   tags: string[]; created_at: number; recipe: Recipe
+  expires_at?: number; user_id?: number; owner?: string
 }
 export interface Job {
   id: number; kind: string; group_id: string; slot: number; channel_id: number
@@ -34,8 +35,19 @@ export interface Job {
 export interface PromptItem {
   id: number; title: string; content: string; is_template: boolean; tags: string[]
   pinned: boolean; use_count: number; created_at: number; updated_at: number
+  user_id?: number; owner?: string
 }
 export interface Facet { name: string; count: number }
+export interface Quota { limit: number; used: number; bonus: number; remaining: number; unlimited: boolean }
+export interface Me { id: number; username: string; nickname: string; role: 'admin' | 'user'; nsfw: boolean; display: string }
+export interface MeInfo { authed: boolean; user?: Me; quota?: Quota; register_mode: 'closed' | 'open' | 'invite'; retention_hours?: number; version: string }
+export interface UserRow {
+  id: number; username: string; nickname: string; role: 'admin' | 'user'; disabled: boolean; nsfw: boolean
+  daily_quota: number; bonus: number; allowed_models: string[]; max_concurrent: number
+  created_at: number; last_login_at: number
+  display: string; used_today: number; quota: number; images: number; favorites: number; bytes: number; total_gen: number; active_jobs: number
+}
+export interface Invite { code: string; max_uses: number; used: number; daily_quota: number; bonus: number; note: string; expires_at: number; created_at: number }
 
 export class ApiError extends Error { status: number; constructor(m: string, s: number) { super(m); this.status = s } }
 

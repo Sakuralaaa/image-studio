@@ -45,6 +45,7 @@ type Channel struct {
 	Sort       int      `json:"sort"`
 	ToolPathAt int64    `json:"tool_path_at"`
 	CreatedAt  int64    `json:"created_at"`
+	Hidden     bool     `json:"hidden"` // 仅管理员可用
 }
 
 var allRatios = []string{"1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2", "9:19.5", "19.5:9", "9:20", "20:9", "21:9", "5:2"}
@@ -86,13 +87,13 @@ func presets() []Preset {
 				Aspect:      Cap{Mode: "native", Values: allRatios, Default: "1:1"},
 				Resolution:  Cap{Mode: "off", Values: []string{"1k", "2k"}, Default: "2k"},
 				Quality:     Cap{Mode: "off", Values: []string{"low", "medium", "auto"}, Default: "auto"},
-				N:           Cap{Mode: "native", Max: 10},
+				N:           Cap{Mode: "native", Max: 8}, // 实测：上游报「数量必须在 1 到 8 之间」
 				Format:      off,
 				Compression: off,
 				Background:  off,
 				Moderation:  off,
 				Response:    Cap{Mode: "native", Values: []string{"url"}},
-				Refs:        Cap{Mode: "multipart", Max: 3},
+				Refs:        Cap{Mode: "multipart", Max: 5}, // 实测上限 5
 			},
 		},
 		{
@@ -108,7 +109,7 @@ func presets() []Preset {
 				Background:  off,
 				Moderation:  off,
 				Response:    Cap{Mode: "native", Values: []string{"url"}},
-				Refs:        Cap{Mode: "multipart", Max: 4},
+				Refs:        Cap{Mode: "multipart", Max: 20}, // 实测上限 20
 			},
 		},
 		{
@@ -124,7 +125,7 @@ func presets() []Preset {
 				Background:  off,
 				Moderation:  off,
 				Response:    Cap{Mode: "native", Values: []string{"b64_json"}},
-				Refs:        Cap{Mode: "multipart", Max: 4},
+				Refs:        Cap{Mode: "multipart", Max: 3}, // 声称 4，实测第 4 张上游报错
 			},
 		},
 	}
@@ -145,9 +146,11 @@ func keyTail(k string) string {
 func scanChannel(sc interface{ Scan(...any) error }) (*Channel, error) {
 	var c Channel
 	var models, caps string
-	if err := sc.Scan(&c.ID, &c.Name, &c.BaseURL, &c.APIKey, &c.APIType, &models, &caps, &c.Sort, &c.ToolPathAt, &c.CreatedAt); err != nil {
+	var hidden int
+	if err := sc.Scan(&c.ID, &c.Name, &c.BaseURL, &c.APIKey, &c.APIType, &models, &caps, &c.Sort, &c.ToolPathAt, &c.CreatedAt, &hidden); err != nil {
 		return nil, err
 	}
+	c.Hidden = hidden == 1
 	_ = json.Unmarshal([]byte(models), &c.Models)
 	_ = json.Unmarshal([]byte(caps), &c.Caps)
 	if c.Models == nil {
@@ -157,7 +160,7 @@ func scanChannel(sc interface{ Scan(...any) error }) (*Channel, error) {
 	return &c, nil
 }
 
-const chanCols = `id,name,base_url,api_key,api_type,models,caps,sort,tool_path_at,created_at`
+const chanCols = `id,name,base_url,api_key,api_type,models,caps,sort,tool_path_at,created_at,hidden`
 
 func getChannel(id int64) (*Channel, error) {
 	return scanChannel(db.QueryRow(`SELECT `+chanCols+` FROM channels WHERE id=?`, id))
@@ -181,6 +184,10 @@ func listChannels() ([]*Channel, error) {
 }
 
 func handleChannelList(w http.ResponseWriter, r *http.Request) {
+	if u := cur(r); !u.IsAdmin() {
+		writeJSON(w, userChannels(u))
+		return
+	}
 	cs, err := listChannels()
 	if err != nil {
 		httpErr(w, 500, err.Error())
@@ -229,8 +236,8 @@ func handleChannelSave(w http.ResponseWriter, r *http.Request) {
 	if id == 0 {
 		var maxSort int
 		_ = db.QueryRow(`SELECT COALESCE(MAX(sort),0) FROM channels`).Scan(&maxSort)
-		res, err := db.Exec(`INSERT INTO channels(name,base_url,api_key,api_type,models,caps,sort,created_at) VALUES(?,?,?,?,?,?,?,?)`,
-			in.Name, in.BaseURL, strings.TrimSpace(in.APIKey), in.APIType, mustJSON(in.Models), mustJSON(in.Caps), maxSort+1, now())
+		res, err := db.Exec(`INSERT INTO channels(name,base_url,api_key,api_type,models,caps,sort,created_at,hidden) VALUES(?,?,?,?,?,?,?,?,?)`,
+			in.Name, in.BaseURL, strings.TrimSpace(in.APIKey), in.APIType, mustJSON(in.Models), mustJSON(in.Caps), maxSort+1, now(), b2i(in.Hidden))
 		if err != nil {
 			httpErr(w, 500, err.Error())
 			return
@@ -250,8 +257,8 @@ func handleChannelSave(w http.ResponseWriter, r *http.Request) {
 		if old.BaseURL != in.BaseURL {
 			toolAt = 0
 		}
-		_, err = db.Exec(`UPDATE channels SET name=?,base_url=?,api_key=?,api_type=?,models=?,caps=?,tool_path_at=? WHERE id=?`,
-			in.Name, in.BaseURL, key, in.APIType, mustJSON(in.Models), mustJSON(in.Caps), toolAt, id)
+		_, err = db.Exec(`UPDATE channels SET name=?,base_url=?,api_key=?,api_type=?,models=?,caps=?,tool_path_at=?,hidden=? WHERE id=?`,
+			in.Name, in.BaseURL, key, in.APIType, mustJSON(in.Models), mustJSON(in.Caps), toolAt, b2i(in.Hidden), id)
 		if err != nil {
 			httpErr(w, 500, err.Error())
 			return

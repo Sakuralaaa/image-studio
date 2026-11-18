@@ -739,3 +739,41 @@ input[type=number]::-webkit-inner-spin-button { opacity: .4; }
 @media (max-width: 380px) {
   .nav-item { padding: 0 10px; }
 }
+
+/* 账号 */
+.login-card .input + .input { margin-top: -8px; }
+.input-code { text-transform: uppercase; letter-spacing: .12em; font-variant-numeric: tabular-nums; }
+.login-switch { font-size: 13px; color: var(--text-3); padding: 4px 8px; border-radius: 8px; }
+.login-switch:hover { color: var(--text); background: var(--hover); }
+.kv dd.is-warn { color: var(--warn); }
+.quota-left { font-size: 12px; line-height: 16px; color: var(--text-3); padding: 0 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.quota-left.is-out { color: var(--danger); }
+
+/* 用户与系统 */
+.user-card.is-off { opacity: .6; }
+.ch-name .you { font-weight: 400; color: var(--text-3); }
+.mini-tag.is-accent { background: var(--accent-soft); color: var(--accent-text); }
+.mini-tag.is-danger { color: var(--danger); }
+.g-col { display: flex; flex-direction: column; gap: 8px; }
+.g-k { width: 112px; flex: none; color: var(--text-2); }
+.g-input { width: 200px; }
+.g-note { margin-top: 12px; font-size: 13px; line-height: 20px; color: var(--text-3); }
+.g-foot { margin-top: 16px; }
+.general > .g-foot { margin-top: 0; }
+.grant-row { margin-top: 16px; }
+.stats-tight { margin-top: 0; }
+.field-inline { display: flex; align-items: center; gap: 12px; }
+.inv-list { display: flex; flex-direction: column; }
+.inv { display: flex; align-items: center; gap: 16px; min-height: 48px; border-top: 1px solid var(--line); }
+.inv:first-child { border-top: 0; }
+.inv-code { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 15px; letter-spacing: .08em; font-weight: 600; }
+.inv-meta { font-size: 13px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.inv.is-dead .inv-code { color: var(--text-3); text-decoration: line-through; }
+.center-pad { padding: 48px; display: grid; place-items: center; }
+@media (max-width: 640px) {
+  .g-k { width: 100%; }
+  .g-input { width: 100%; }
+  .inv { flex-wrap: wrap; gap: 4px 12px; padding: 8px 0; }
+}
+.mpick.is-flat .mpick-group + .mpick-group { margin-top: 0; padding-top: 0; border-top: 0; }
+.mk-scope { width: 150px; flex: none; }

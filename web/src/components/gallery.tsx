@@ -12,7 +12,7 @@ export function recipeText(img: Img) {
   return [
     `提示词：${r.prompt}`,
     r.sent_prompt && r.sent_prompt !== r.prompt ? `实际发送：${r.sent_prompt}` : '',
-    `渠道：${r.channel_name}（${apiTypeLabels[r.api_type] || r.api_type}）`,
+    r.channel_name ? `渠道：${r.channel_name}（${apiTypeLabels[r.api_type] || r.api_type}）` : '',
     `模型：${r.model}`,
     params,
     `输出：${img.width}×${img.height} · ${img.format.toUpperCase()} · ${fmtBytes(img.bytes)}`,
@@ -36,7 +36,7 @@ export function useImageActions(onChange: (img: Img) => void, onRemove: (id: num
       const exists = channels.some(c => c.id === r.channel_id)
       setComposer({ text: r.prompt, chips: [], vars: {}, ...(exists ? { channelId: r.channel_id, model: r.model } : {}), params: { ...(r.params || {}) } })
       go('generate')
-      toast(exists ? '配方已填入' : '配方已填入，原渠道已删除', exists ? 'ok' : 'info')
+      toast(exists ? '配方已填入' : '配方已填入，原模型已不可用', exists ? 'ok' : 'info')
     },
     async remove(img: Img) {
       if (img.favorite && !confirm('这张图是资产，确定删除原图吗？')) return
@@ -222,14 +222,17 @@ export function Lightbox({ list, index, onIndex, onClose, actions, onChange, alb
           )}
           <section className="lb-sec">
             <dl className="kv">
-              <dt>渠道</dt><dd>{r.channel_name || '—'}</dd>
-              <dt>接口</dt><dd>{apiTypeLabels[r.api_type] || '—'}{r.ref_count ? ` · 参考图 ${r.ref_count} 张` : ''}</dd>
+              {img.owner && <><dt>用户</dt><dd>{img.owner}</dd></>}
+              {r.channel_name && <><dt>渠道</dt><dd>{r.channel_name}</dd>
+              <dt>接口</dt><dd>{apiTypeLabels[r.api_type] || '—'}{r.ref_count ? ` · 参考图 ${r.ref_count} 张` : ''}</dd></>}
+              {!r.channel_name && r.ref_count > 0 && <><dt>参考图</dt><dd>{r.ref_count} 张</dd></>}
               <dt>模型</dt><dd>{r.model}</dd>
               {params.map(p => <KV key={p.k} k={p.k} v={p.v} />)}
               <dt>实际尺寸</dt><dd>{img.width}×{img.height} · {ratioOf(img.width, img.height)}</dd>
               <dt>文件</dt><dd>{img.format.toUpperCase()} · {fmtBytes(img.bytes)}</dd>
               <dt>耗时</dt><dd>{fmtDuration(r.duration_ms)}</dd>
               <dt>时间</dt><dd>{fmtTime(img.created_at)}</dd>
+              {!img.favorite && !!img.expires_at && <><dt>保留至</dt><dd className="is-warn">{fmtTime(img.expires_at)}</dd></>}
               {r.tool_path && <><dt>链路</dt><dd>对话工具链路</dd></>}
             </dl>
           </section>

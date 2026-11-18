@@ -27,7 +27,7 @@ export function PageHead({ title, sub, children }: { title: string; sub?: string
 }
 
 export default function Compare() {
-  const { channels, toast, go, bumpGallery } = useStore()
+  const { channels, toast, go, bumpGallery, isAdmin, reloadMe } = useStore()
   const saved = load()
   const [prompt, setPrompt] = useState(saved?.prompt || '')
   const [combos, setCombos] = useState<Combo[]>(saved?.combos || [])
@@ -74,7 +74,7 @@ export default function Compare() {
       const res = await api<{ group_id: string }>('/api/compare', { body: { prompt, refs: refs.slice(0, Math.max(0, refMax)).map(r => r.id), combos: combos.map(c => ({ channel_id: c.channelId, model: c.model, params: c.params })) } })
       setGroup(res.group_id)
     } catch (e: any) { toast(e.message, 'err') }
-    finally { setBusy(false) }
+    finally { setBusy(false); reloadMe() }
   }
 
   const upd = (key: number, patch: Partial<Combo>) => setCombos(cs => cs.map(c => (c.key === key ? { ...c, ...patch } : c)))
@@ -88,7 +88,9 @@ export default function Compare() {
   const actions = useImageActions(patchImg, id => setJobs(js => js.map(j => ({ ...j, images: j.images.filter(x => x.id !== id) }))))
 
   if (!channels.length) return (
-    <div className="page"><PageHead title="对比" /><div className="card card-empty"><Empty art="plug" title="先接入一个渠道" action={<button className="btn btn-primary" onClick={() => go('settings')}><Plug size={16} />添加渠道</button>} /></div></div>
+    <div className="page"><PageHead title="对比" /><div className="card card-empty">{isAdmin
+      ? <Empty art="plug" title="先接入一个渠道" action={<button className="btn btn-primary" onClick={() => go('settings')}><Plug size={16} />添加渠道</button>} />
+      : <Empty art="plug" title="暂无可用模型" text="请联系管理员开通" />}</div></div>
   )
 
   return (
@@ -117,11 +119,17 @@ export default function Compare() {
                 {combos.length > 1 && <button className="icon-btn sm" onClick={() => setCombos(cs => cs.filter(x => x.key !== c.key))} aria-label="移除组合"><X size={16} /></button>}
               </div>
               <div className="combo-body">
+{isAdmin ? <>
                 <div className="prow"><div className="prow-label">渠道</div>
                   <Select size="sm" value={String(c.channelId)} options={channels.map(x => ({ value: String(x.id), label: x.name }))}
                     onChange={v => { const nc = channels.find(x => x.id === Number(v)); upd(c.key, { channelId: Number(v), model: nc?.models[0] || '', params: normalizeParams(nc, c.params) }) }} /></div>
                 <div className="prow"><div className="prow-label">模型</div>
                   <Select size="sm" value={c.model} placeholder="未选择模型" options={(ch?.models || []).map(m => ({ value: m, label: m }))} onChange={v => upd(c.key, { model: v })} /></div>
+                </> : (
+                <div className="prow"><div className="prow-label">模型</div>
+                  <Select size="sm" value={String(c.channelId)} placeholder="未选择模型" options={channels.map(x => ({ value: String(x.id), label: x.models[0] || '' }))}
+                    onChange={v => { const nc = channels.find(x => x.id === Number(v)); upd(c.key, { channelId: Number(v), model: nc?.models[0] || '', params: normalizeParams(nc, c.params) }) }} /></div>
+                )}
                 <ParamControls compact size="sm" channel={ch} params={c.params} onChange={p => upd(c.key, { params: p })} />
               </div>
             </div>
@@ -159,7 +167,7 @@ function CmpCell({ job, idx, onOpen, onFav }: { job: Job; idx: number; onOpen: (
     <div className="cmp-cell">
       <div className="cmp-cell-head">
         <span className="letter">{String.fromCharCode(65 + idx)}</span>
-        <div className="cmp-cell-title"><b title={job.channel_name}>{job.channel_name}</b><span title={job.model}>{job.model}</span></div>
+        <div className="cmp-cell-title">{job.channel_name ? <><b title={job.channel_name}>{job.channel_name}</b><span title={job.model}>{job.model}</span></> : <b title={job.model}>{job.model}</b>}</div>
         {img && <button className={`icon-btn sm ${img.favorite ? 'is-fav' : ''}`} onClick={() => onFav(img)} aria-label="收藏" title={img.favorite ? '取消收藏' : '收藏'}><Heart size={16} fill={img.favorite ? 'currentColor' : 'none'} /></button>}
       </div>
       <div className="cmp-frame">

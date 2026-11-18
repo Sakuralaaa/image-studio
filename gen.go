@@ -52,14 +52,26 @@ func newGroupID() string {
 	return hex.EncodeToString(b)
 }
 
-func createJob(in JobIn, kind, group string, slot int) (int64, error) {
+// jobWant 这个任务预计产出的张数（用于额度）
+func jobWant(ch *Channel, p Params) int {
+	n := p.N
+	if n <= 0 || ch.Caps.N.Mode == "off" {
+		n = 1
+	}
+	if ch.Caps.N.Max > 0 && n > ch.Caps.N.Max {
+		n = ch.Caps.N.Max
+	}
+	return n
+}
+
+func createJob(u *User, in JobIn, kind, group string, slot int) (int64, error) {
 	in.Prompt = strings.TrimSpace(in.Prompt)
 	if in.Prompt == "" {
 		return 0, errors.New("提示词不能为空")
 	}
 	ch, err := getChannel(in.ChannelID)
 	if err != nil {
-		return 0, errors.New("渠道不存在")
+		return 0, errors.New("模型不可用")
 	}
 	if in.Model == "" {
 		if len(ch.Models) == 0 {
@@ -67,16 +79,36 @@ func createJob(in JobIn, kind, group string, slot int) (int64, error) {
 		}
 		in.Model = ch.Models[0]
 	}
+	if !canUseChannelModel(u, ch, in.Model) {
+		return 0, errors.New("没有这个模型的使用权限")
+	}
 	if in.Refs == nil {
 		in.Refs = []int64{}
 	}
-	res, err := db.Exec(`INSERT INTO jobs(kind,group_id,slot,channel_id,channel_name,api_type,model,prompt,params,refs,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?, 'queued', ?)`,
-		kind, group, slot, ch.ID, ch.Name, ch.APIType, in.Model, in.Prompt, mustJSON(in.Params), mustJSON(in.Refs), now())
+	// 参考图必须是自己上传的
+	if !u.IsAdmin() {
+		for _, rid := range in.Refs {
+			var owner int64
+			if db.QueryRow(`SELECT user_id FROM refs WHERE id=?`, rid).Scan(&owner) != nil || owner != u.ID {
+				return 0, errors.New("参考图不存在，请重新上传")
+			}
+		}
+	}
+	if max := ch.Caps.Refs.Max; ch.Caps.Refs.Mode != "off" && max > 0 && len(in.Refs) > max {
+		in.Refs = in.Refs[:max]
+	}
+	want := jobWant(ch, in.Params)
+	resv, err := reserveQuota(u, want, slot == 0)
+	if err != nil {
+		return 0, err
+	}
+	res, err := db.Exec(`INSERT INTO jobs(kind,group_id,slot,channel_id,channel_name,api_type,model,prompt,params,refs,status,created_at,user_id,quota_daily,quota_bonus,quota_day) VALUES(?,?,?,?,?,?,?,?,?,?, 'queued', ?,?,?,?,?)`,
+		kind, group, slot, ch.ID, ch.Name, ch.APIType, in.Model, in.Prompt, mustJSON(in.Params), mustJSON(in.Refs), now(), u.ID, resv.daily, resv.bonus, resv.day)
 	if err != nil {
 		return 0, err
 	}
 	id, _ := res.LastInsertId()
-	go runJob(id, ch, in)
+	go runJob(id, ch, in, want)
 	return id, nil
 }
 
@@ -86,12 +118,13 @@ func handleJobCreate(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, err.Error())
 		return
 	}
-	id, err := createJob(in, "single", "", 0)
+	id, err := createJob(cur(r), in, "single", "", 0)
 	if err != nil {
 		httpErr(w, 400, err.Error())
 		return
 	}
 	j, _ := loadJob(id)
+	sanitizeJob(cur(r), j)
 	writeJSON(w, j)
 }
 
@@ -102,10 +135,13 @@ type genResult struct {
 	toolPath bool
 }
 
-func runJob(id int64, ch *Channel, in JobIn) {
+func runJob(id int64, ch *Channel, in JobIn, want int) {
 	genSem <- struct{}{}
 	defer func() { <-genSem }()
 	start := time.Now()
+	saved := 0
+	// 没生成出来的张数退回额度
+	defer func() { refundQuota(id, want-saved) }()
 	_, _ = db.Exec(`UPDATE jobs SET status='running', started_at=? WHERE id=?`, start.UnixMilli(), id)
 
 	fail := func(msg string) {
@@ -160,7 +196,6 @@ func runJob(id int64, ch *Channel, in JobIn) {
 		fail(msg)
 		return
 	}
-	saved := 0
 	for _, data := range all {
 		if err := saveImage(id, data); err != nil {
 			log.Printf("job %d 保存图片失败: %v", id, err)
@@ -716,15 +751,16 @@ type JobOut struct {
 	DurationMS  int64           `json:"duration_ms"`
 	CreatedAt   int64           `json:"created_at"`
 	Images      []*ImageOut     `json:"images"`
+	UserID      int64           `json:"user_id"`
 }
 
-const jobCols = `id,kind,group_id,slot,channel_id,channel_name,api_type,model,prompt,params,refs,sent_prompt,endpoint,status,error,tool_path,started_at,finished_at,duration_ms,created_at`
+const jobCols = `id,kind,group_id,slot,channel_id,channel_name,api_type,model,prompt,params,refs,sent_prompt,endpoint,status,error,tool_path,started_at,finished_at,duration_ms,created_at,user_id`
 
 func scanJob(sc interface{ Scan(...any) error }) (*JobOut, error) {
 	var j JobOut
 	var params, refs string
 	var tp int
-	if err := sc.Scan(&j.ID, &j.Kind, &j.GroupID, &j.Slot, &j.ChannelID, &j.ChannelName, &j.APIType, &j.Model, &j.Prompt, &params, &refs, &j.SentPrompt, &j.Endpoint, &j.Status, &j.Error, &tp, &j.StartedAt, &j.FinishedAt, &j.DurationMS, &j.CreatedAt); err != nil {
+	if err := sc.Scan(&j.ID, &j.Kind, &j.GroupID, &j.Slot, &j.ChannelID, &j.ChannelName, &j.APIType, &j.Model, &j.Prompt, &params, &refs, &j.SentPrompt, &j.Endpoint, &j.Status, &j.Error, &tp, &j.StartedAt, &j.FinishedAt, &j.DurationMS, &j.CreatedAt, &j.UserID); err != nil {
 		return nil, err
 	}
 	j.Params = json.RawMessage(params)
@@ -769,23 +805,51 @@ func queryJobs(where string, args ...any) ([]*JobOut, error) {
 	return out, nil
 }
 
-// GET /api/jobs?limit=8  最近的单图任务（含进行中），用于「本次」区域，刷新不丢
+// sanitizeJob 普通用户看不到渠道名称、接口地址；错误里的上游地址去掉
+func sanitizeJob(u *User, j *JobOut) {
+	if j == nil || u.IsAdmin() {
+		return
+	}
+	j.ChannelName = ""
+	j.Endpoint = ""
+	j.Error = scrubForUser(j.Error)
+	sanitizeImages(u, j.Images)
+}
+
+// GET /api/jobs?limit=8  自己最近的单图任务（含进行中），用于「本次」区域，刷新不丢
 func handleJobList(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 50 {
 		limit = 8
 	}
-	jobs, err := queryJobs(`WHERE kind='single' ORDER BY id DESC LIMIT ?`, limit)
+	u := cur(r)
+	jobs, err := queryJobs(`WHERE kind='single' AND user_id=? ORDER BY id DESC LIMIT ?`, u.ID, limit)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, map[string]any{"jobs": jobs, "server_now": now()})
+	for _, j := range jobs {
+		sanitizeJob(u, j)
+	}
+	writeJSON(w, map[string]any{"jobs": jobs, "server_now": now(), "quota": quotaInfo(u)})
+}
+
+func ownedJob(r *http.Request) (*JobOut, bool) {
+	j, err := loadJob(pathID(r))
+	if err != nil {
+		return nil, false
+	}
+	u := cur(r)
+	if !u.IsAdmin() && j.UserID != u.ID {
+		return nil, false
+	}
+	sanitizeJob(u, j)
+	return j, true
 }
 
 func handleJobGet(w http.ResponseWriter, r *http.Request) {
-	j, err := loadJob(pathID(r))
-	if err != nil {
+	j, ok := ownedJob(r)
+	if !ok {
 		httpErr(w, 404, "任务不存在")
 		return
 	}
@@ -794,6 +858,10 @@ func handleJobGet(w http.ResponseWriter, r *http.Request) {
 
 // 删除任务记录（不删已收藏的图）
 func handleJobDelete(w http.ResponseWriter, r *http.Request) {
+	if _, ok := ownedJob(r); !ok {
+		httpErr(w, 404, "任务不存在")
+		return
+	}
 	id := pathID(r)
 	imgs, _ := queryImages(`WHERE i.job_id=? AND i.favorite=0`, id)
 	for _, im := range imgs {
@@ -837,13 +905,17 @@ func handleCompareCreate(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "提示词不能为空")
 		return
 	}
+	if q := quotaInfo(cur(r)); !q.Unlimited && q.Remaining < len(in.Combos) {
+		httpErr(w, 400, fmt.Sprintf("额度不足，今天还能生成 %d 张", q.Remaining))
+		return
+	}
 	compareMu.Lock()
 	defer compareMu.Unlock()
 	gid := newGroupID()
 	for i, c := range in.Combos {
 		p := c.Params
 		p.N = 1
-		if _, err := createJob(JobIn{ChannelID: c.ChannelID, Model: c.Model, Prompt: in.Prompt, Params: p, Refs: in.Refs}, "compare", gid, i); err != nil {
+		if _, err := createJob(cur(r), JobIn{ChannelID: c.ChannelID, Model: c.Model, Prompt: in.Prompt, Params: p, Refs: in.Refs}, "compare", gid, i); err != nil {
 			httpErr(w, 400, fmt.Sprintf("组合 %d：%s", i+1, err.Error()))
 			return
 		}
@@ -852,16 +924,25 @@ func handleCompareCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCompareGet(w http.ResponseWriter, r *http.Request) {
-	jobs, err := queryJobs(`WHERE group_id=? ORDER BY slot`, r.PathValue("gid"))
+	u := cur(r)
+	q := `WHERE group_id=? AND user_id=? ORDER BY slot`
+	args := []any{r.PathValue("gid"), u.ID}
+	if u.IsAdmin() {
+		q, args = `WHERE group_id=? ORDER BY slot`, args[:1]
+	}
+	jobs, err := queryJobs(q, args...)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
+	}
+	for _, j := range jobs {
+		sanitizeJob(u, j)
 	}
 	writeJSON(w, map[string]any{"group_id": r.PathValue("gid"), "jobs": jobs, "server_now": now()})
 }
 
 func handleCompareList(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query(`SELECT group_id, MIN(prompt), COUNT(*), MIN(created_at) FROM jobs WHERE kind='compare' AND group_id<>'' GROUP BY group_id ORDER BY MIN(id) DESC LIMIT 20`)
+	rows, err := db.Query(`SELECT group_id, MIN(prompt), COUNT(*), MIN(created_at) FROM jobs WHERE kind='compare' AND group_id<>'' AND user_id=? GROUP BY group_id ORDER BY MIN(id) DESC LIMIT 20`, cur(r).ID)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return

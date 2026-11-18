@@ -3,6 +3,7 @@ import { AlertTriangle, RotateCw, X, Plug, ArrowRight, Sparkles } from 'lucide-r
 import { api, marketImg, type Img, type Job, type MarketPrompt } from '../api'
 import { useStore } from '../store'
 import { Empty, Segmented, Spinner, useInterval, useNow } from '../components/ui'
+import { UserScope } from './Assets'
 import { ImageTile, Justified, Lightbox, useImageActions } from '../components/gallery'
 import { useImages, useSentinel } from '../components/useImages'
 import { Composer } from '../components/composer'
@@ -12,7 +13,8 @@ import { aspectNumber, fmtDuration } from '../labels'
 type Cell = { kind: 'img'; img: Img } | { kind: 'job'; job: Job; slot: number }
 
 export default function Generate() {
-  const { channels, channelsLoaded, go, galleryTick, bumpGallery, genView, setGenView } = useStore()
+  const { channels, channelsLoaded, go, galleryTick, bumpGallery, genView, setGenView, isAdmin, reloadMe, toast } = useStore()
+  const [scope, setScope] = useState('me')
   const [jobs, setJobs] = useState<Job[]>([])
   const [dismissed, setDismissed] = useState<number[]>(() => JSON.parse(sessionStorage.getItem('studio.dismissed') || '[]'))
   const [favOnly, setFavOnly] = useState(false)
@@ -25,7 +27,7 @@ export default function Generate() {
     let finished = false
     prevActive.current.forEach(id => { if (!active.has(id)) finished = true })
     prevActive.current = active
-    if (finished) bumpGallery()
+    if (finished) { bumpGallery(); reloadMe() }
   }
   useEffect(() => { loadJobs().catch(() => {}) }, [])
   const anyActive = jobs.some(j => j.status === 'queued' || j.status === 'running')
@@ -44,11 +46,12 @@ export default function Generate() {
       setJobs(js => [job, ...js.filter(x => x.id !== j.id)])
       prevActive.current.add(job.id)
       api(`/api/jobs/${j.id}`, { method: 'DELETE' }).catch(() => {})
-    } catch {}
+      reloadMe()
+    } catch (e: any) { toast(e.message, 'err') }
   }
   const dismiss = (j: Job) => { setDismissed(d => [...d, j.id]); api(`/api/jobs/${j.id}`, { method: 'DELETE' }).catch(() => {}) }
 
-  const hist = useImages(favOnly ? { fav: '1' } : {}, galleryTick)
+  const hist = useImages({ fav: favOnly ? '1' : '', user: isAdmin ? scope : '' }, galleryTick)
   const patch = (img: Img) => hist.update(img)
   const actions = useImageActions(img => { if (favOnly && !img.favorite) hist.remove(img.id); else patch(img) }, id => hist.remove(id))
   const sentinel = useSentinel(hist.more, !!hist.next && genView === 'gallery')
@@ -58,7 +61,7 @@ export default function Generate() {
   // 进行中的任务 + 刚失败的任务，作为骨架/错误格子排在图库最前面
   const have = new Set(hist.images.map(i => i.id))
   const recent = Date.now() - 3600e3
-  const pending: Cell[] = favOnly ? [] : jobs.flatMap(j => {
+  const pending: Cell[] = favOnly || (isAdmin && scope !== 'me' && scope !== '') ? [] : jobs.flatMap(j => {
     const active = j.status === 'queued' || j.status === 'running'
     const waiting = j.status === 'done' && j.images.some(i => !have.has(i.id)) && j.finished_at > Date.now() - 15000
     const failed = j.status === 'failed' && j.created_at > recent && !dismissed.includes(j.id)
@@ -71,7 +74,9 @@ export default function Generate() {
   if (channelsLoaded && channels.length === 0) {
     return (
       <div className="gen-empty">
-        <Empty art="plug" title="先接入一个渠道" action={<button className="btn btn-primary" onClick={() => go('settings')}><Plug size={16} />添加渠道</button>} />
+        {isAdmin
+          ? <Empty art="plug" title="先接入一个渠道" action={<button className="btn btn-primary" onClick={() => go('settings')}><Plug size={16} />添加渠道</button>} />
+          : <Empty art="plug" title="暂无可用模型" text="请联系管理员开通" />}
       </div>
     )
   }
@@ -86,6 +91,7 @@ export default function Generate() {
             <h1 className="gal-title">作品</h1>
             <span className="gal-count">{hist.next ? `${hist.images.length}+` : hist.images.length} 张</span>
             <span className="grow" />
+            {isAdmin && <UserScope value={scope} onChange={setScope} tick={galleryTick} />}
             <Segmented size="sm" block={false} value={favOnly ? 'fav' : 'all'} onChange={v => setFavOnly(v === 'fav')} options={[{ value: 'all', label: '全部' }, { value: 'fav', label: '已收藏' }]} />
             <button className="btn btn-secondary btn-sm" onClick={() => setGenView('hero')}><Sparkles size={14} />灵感</button>
           </div>

@@ -63,8 +63,8 @@ func saveImage(jobID int64, data []byte) error {
 	} else {
 		log.Printf("缩略图生成失败: %v", err)
 	}
-	_, err = db.Exec(`INSERT INTO images(job_id,file,thumb,width,height,bytes,format,created_at) VALUES(?,?,?,?,?,?,?,?)`,
-		jobID, file, thumb, cfg.Width, cfg.Height, len(data), ext, now())
+	_, err = db.Exec(`INSERT INTO images(job_id,file,thumb,width,height,bytes,format,created_at,user_id) VALUES(?,?,?,?,?,?,?,?,COALESCE((SELECT user_id FROM jobs WHERE id=?),0))`,
+		jobID, file, thumb, cfg.Width, cfg.Height, len(data), ext, now(), jobID)
 	return err
 }
 
@@ -123,7 +123,7 @@ func handleRefUpload(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 500, err.Error())
 		return
 	}
-	res, err := db.Exec(`INSERT INTO refs(file,mime,created_at) VALUES(?,?,?)`, file, mime, now())
+	res, err := db.Exec(`INSERT INTO refs(file,mime,created_at,user_id) VALUES(?,?,?,?)`, file, mime, now(), cur(r).ID)
 	if err != nil {
 		httpErr(w, 500, err.Error())
 		return
@@ -148,6 +148,9 @@ type ImageOut struct {
 	Album     string   `json:"album"`
 	Tags      []string `json:"tags"`
 	CreatedAt int64    `json:"created_at"`
+	ExpiresAt int64    `json:"expires_at"` // 未收藏图片的清理时间，0 = 不清理
+	UserID    int64    `json:"user_id"`
+	Owner     string   `json:"owner"`
 	Recipe    Recipe   `json:"recipe"`
 }
 
@@ -168,8 +171,9 @@ type Recipe struct {
 }
 
 const imgSelect = `SELECT i.id,i.job_id,i.file,i.thumb,i.width,i.height,i.bytes,i.format,i.favorite,i.fav_at,i.album,i.tags,i.created_at,
- COALESCE(j.channel_id,0),COALESCE(j.channel_name,''),COALESCE(j.api_type,''),COALESCE(j.model,''),COALESCE(j.prompt,''),COALESCE(j.sent_prompt,''),COALESCE(j.params,'{}'),COALESCE(j.endpoint,''),COALESCE(j.duration_ms,0),COALESCE(j.tool_path,0),COALESCE(j.kind,''),COALESCE(j.group_id,''),COALESCE(j.refs,'[]')
- FROM images i LEFT JOIN jobs j ON j.id=i.job_id `
+ COALESCE(j.channel_id,0),COALESCE(j.channel_name,''),COALESCE(j.api_type,''),COALESCE(j.model,''),COALESCE(j.prompt,''),COALESCE(j.sent_prompt,''),COALESCE(j.params,'{}'),COALESCE(j.endpoint,''),COALESCE(j.duration_ms,0),COALESCE(j.tool_path,0),COALESCE(j.kind,''),COALESCE(j.group_id,''),COALESCE(j.refs,'[]'),
+ i.user_id,COALESCE(NULLIF(u.nickname,''),u.username,'')
+ FROM images i LEFT JOIN jobs j ON j.id=i.job_id LEFT JOIN users u ON u.id=i.user_id `
 
 func queryImages(where string, args ...any) ([]*ImageOut, error) {
 	rows, err := db.Query(imgSelect+where, args...)
@@ -178,15 +182,19 @@ func queryImages(where string, args ...any) ([]*ImageOut, error) {
 	}
 	defer rows.Close()
 	out := []*ImageOut{}
+	keep := int64(retentionHours()) * 3600 * 1000
 	for rows.Next() {
 		var im ImageOut
 		var fav, tp int
 		var tags, params, refs string
 		if err := rows.Scan(&im.ID, &im.JobID, &im.URL, &im.Thumb, &im.Width, &im.Height, &im.Bytes, &im.Format, &fav, &im.FavAt, &im.Album, &tags, &im.CreatedAt,
-			&im.Recipe.ChannelID, &im.Recipe.ChannelName, &im.Recipe.APIType, &im.Recipe.Model, &im.Recipe.Prompt, &im.Recipe.SentPrompt, &params, &im.Recipe.Endpoint, &im.Recipe.DurationMS, &tp, &im.Recipe.Kind, &im.Recipe.GroupID, &refs); err != nil {
+			&im.Recipe.ChannelID, &im.Recipe.ChannelName, &im.Recipe.APIType, &im.Recipe.Model, &im.Recipe.Prompt, &im.Recipe.SentPrompt, &params, &im.Recipe.Endpoint, &im.Recipe.DurationMS, &tp, &im.Recipe.Kind, &im.Recipe.GroupID, &refs, &im.UserID, &im.Owner); err != nil {
 			return nil, err
 		}
 		im.Favorite = fav == 1
+		if !im.Favorite && keep > 0 {
+			im.ExpiresAt = im.CreatedAt + keep
+		}
 		im.Recipe.ToolPath = tp == 1
 		im.Recipe.Params = json.RawMessage(params)
 		var rl []int64
@@ -210,8 +218,7 @@ func queryImages(where string, args ...any) ([]*ImageOut, error) {
 // GET /api/images?fav=1&q=&album=&tag=&channel=&model=&cursor=&limit=
 func handleImageList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	var conds []string
-	var args []any
+	conds, args := imageScope(cur(r), q.Get("user"))
 	if q.Get("fav") == "1" {
 		conds = append(conds, "i.favorite=1")
 	}
@@ -221,8 +228,13 @@ func handleImageList(w http.ResponseWriter, r *http.Request) {
 	}
 	if s := strings.TrimSpace(q.Get("q")); s != "" {
 		like := "%" + s + "%"
-		conds = append(conds, "(j.prompt LIKE ? OR i.tags LIKE ? OR i.album LIKE ? OR j.channel_name LIKE ? OR j.model LIKE ?)")
-		args = append(args, like, like, like, like, like)
+		if cur(r).IsAdmin() {
+			conds = append(conds, "(j.prompt LIKE ? OR i.tags LIKE ? OR i.album LIKE ? OR j.channel_name LIKE ? OR j.model LIKE ?)")
+			args = append(args, like, like, like, like, like)
+		} else {
+			conds = append(conds, "(j.prompt LIKE ? OR i.tags LIKE ? OR i.album LIKE ? OR j.model LIKE ?)")
+			args = append(args, like, like, like, like)
+		}
 	}
 	if a := q.Get("album"); a != "" {
 		conds = append(conds, "i.album=?")
@@ -232,7 +244,7 @@ func handleImageList(w http.ResponseWriter, r *http.Request) {
 		conds = append(conds, "i.tags LIKE ?")
 		args = append(args, "%"+mustJSON(t)+"%")
 	}
-	if c := q.Get("channel"); c != "" {
+	if c := q.Get("channel"); c != "" && cur(r).IsAdmin() {
 		conds = append(conds, "j.channel_name=?")
 		args = append(args, c)
 	}
@@ -253,6 +265,7 @@ func handleImageList(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 500, err.Error())
 		return
 	}
+	sanitizeImages(cur(r), imgs)
 	var next int64
 	if len(imgs) > limit {
 		imgs = imgs[:limit]
@@ -272,10 +285,49 @@ func getImage(id int64) (*ImageOut, error) {
 	return imgs[0], nil
 }
 
-func handleImageGet(w http.ResponseWriter, r *http.Request) {
+// imageScope 普通用户只看自己的；管理员默认看全部，可按 user 过滤（me = 自己）
+func imageScope(u *User, filter string) ([]string, []any) {
+	if !u.IsAdmin() {
+		return []string{"i.user_id=?"}, []any{u.ID}
+	}
+	if filter == "me" {
+		return []string{"i.user_id=?"}, []any{u.ID}
+	}
+	if id, _ := strconv.ParseInt(filter, 10, 64); id > 0 {
+		return []string{"i.user_id=?"}, []any{id}
+	}
+	return nil, nil
+}
+
+func sanitizeImages(u *User, imgs []*ImageOut) {
+	if u.IsAdmin() {
+		return
+	}
+	for _, im := range imgs {
+		im.Recipe.ChannelName = ""
+		im.Recipe.Endpoint = ""
+		im.Owner = ""
+	}
+}
+
+// ownedImage 取图片并检查归属
+func ownedImage(r *http.Request) (*ImageOut, bool) {
 	im, err := getImage(pathID(r))
 	if err != nil {
-		httpErr(w, 404, err.Error())
+		return nil, false
+	}
+	u := cur(r)
+	if !u.IsAdmin() && im.UserID != u.ID {
+		return nil, false
+	}
+	sanitizeImages(u, []*ImageOut{im})
+	return im, true
+}
+
+func handleImageGet(w http.ResponseWriter, r *http.Request) {
+	im, ok := ownedImage(r)
+	if !ok {
+		httpErr(w, 404, "图片不存在")
 		return
 	}
 	writeJSON(w, im)
@@ -283,6 +335,10 @@ func handleImageGet(w http.ResponseWriter, r *http.Request) {
 
 func handleImagePatch(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
+	if _, ok := ownedImage(r); !ok {
+		httpErr(w, 404, "图片不存在")
+		return
+	}
 	var in struct {
 		Favorite *bool    `json:"favorite"`
 		Album    *string  `json:"album"`
@@ -314,9 +370,9 @@ func handleImagePatch(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = db.Exec(`UPDATE images SET tags=? WHERE id=?`, mustJSON(clean), id)
 	}
-	im, err := getImage(id)
-	if err != nil {
-		httpErr(w, 404, err.Error())
+	im, ok := ownedImage(r)
+	if !ok {
+		httpErr(w, 404, "图片不存在")
 		return
 	}
 	writeJSON(w, im)
@@ -335,7 +391,12 @@ func deleteImage(id int64) {
 }
 
 func handleImageDelete(w http.ResponseWriter, r *http.Request) {
-	deleteImage(pathID(r))
+	im, ok := ownedImage(r)
+	if !ok {
+		httpErr(w, 404, "图片不存在")
+		return
+	}
+	deleteImage(im.ID)
 	writeJSON(w, map[string]any{"ok": true})
 }
 
@@ -346,9 +407,9 @@ func downloadName(im *ImageOut) string {
 }
 
 func handleImageDownload(w http.ResponseWriter, r *http.Request) {
-	im, err := getImage(pathID(r))
-	if err != nil {
-		httpErr(w, 404, err.Error())
+	im, ok := ownedImage(r)
+	if !ok {
+		httpErr(w, 404, "图片不存在")
 		return
 	}
 	w.Header().Set("Content-Disposition", `attachment; filename="`+downloadName(im)+`"`)
@@ -369,15 +430,17 @@ func handleImageExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var imgs []*ImageOut
+	u := cur(r)
 	if len(in.IDs) == 0 && in.Fav {
-		imgs, _ = queryImages(`WHERE i.favorite=1 ORDER BY i.id DESC`)
+		imgs, _ = queryImages(`WHERE i.favorite=1 AND i.user_id=? ORDER BY i.id DESC`, u.ID)
 	} else {
 		for _, id := range in.IDs {
-			if im, err := getImage(id); err == nil {
+			if im, err := getImage(id); err == nil && (u.IsAdmin() || im.UserID == u.ID) {
 				imgs = append(imgs, im)
 			}
 		}
 	}
+	sanitizeImages(u, imgs)
 	if len(imgs) == 0 {
 		httpErr(w, 400, "没有可导出的图片")
 		return
@@ -409,10 +472,16 @@ func handleImageExport(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/facets 资产库筛选项
 func handleFacets(w http.ResponseWriter, r *http.Request) {
+	u := cur(r)
+	conds, args := imageScope(u, r.URL.Query().Get("user"))
+	scope := "1=1"
+	if len(conds) > 0 {
+		scope = strings.Join(conds, " AND ")
+	}
 	out := map[string]any{}
 	collect := func(q string) []map[string]any {
 		res := []map[string]any{}
-		rows, err := db.Query(q)
+		rows, err := db.Query(q, args...)
 		if err != nil {
 			return res
 		}
@@ -426,11 +495,16 @@ func handleFacets(w http.ResponseWriter, r *http.Request) {
 		}
 		return res
 	}
-	out["albums"] = collect(`SELECT album, COUNT(*) FROM images WHERE favorite=1 AND album<>'' GROUP BY album ORDER BY COUNT(*) DESC`)
-	out["channels"] = collect(`SELECT j.channel_name, COUNT(*) FROM images i JOIN jobs j ON j.id=i.job_id WHERE i.favorite=1 GROUP BY j.channel_name ORDER BY COUNT(*) DESC`)
-	out["models"] = collect(`SELECT j.model, COUNT(*) FROM images i JOIN jobs j ON j.id=i.job_id WHERE i.favorite=1 GROUP BY j.model ORDER BY COUNT(*) DESC`)
+	out["albums"] = collect(`SELECT i.album, COUNT(*) FROM images i WHERE ` + scope + ` AND i.favorite=1 AND i.album<>'' GROUP BY i.album ORDER BY COUNT(*) DESC`)
+	if u.IsAdmin() {
+		out["channels"] = collect(`SELECT j.channel_name, COUNT(*) FROM images i JOIN jobs j ON j.id=i.job_id WHERE ` + scope + ` AND i.favorite=1 GROUP BY j.channel_name ORDER BY COUNT(*) DESC`)
+		out["users"] = collect(`SELECT CAST(i.user_id AS TEXT) || '|' || COALESCE(NULLIF(us.nickname,''),us.username,''), COUNT(*) FROM images i LEFT JOIN users us ON us.id=i.user_id WHERE ` + scope + ` GROUP BY i.user_id ORDER BY COUNT(*) DESC`)
+	} else {
+		out["channels"] = []map[string]any{}
+	}
+	out["models"] = collect(`SELECT j.model, COUNT(*) FROM images i JOIN jobs j ON j.id=i.job_id WHERE ` + scope + ` AND i.favorite=1 GROUP BY j.model ORDER BY COUNT(*) DESC`)
 	tagCount := map[string]int{}
-	rows, err := db.Query(`SELECT tags FROM images WHERE favorite=1 AND tags<>'[]'`)
+	rows, err := db.Query(`SELECT i.tags FROM images i WHERE `+scope+` AND i.favorite=1 AND i.tags<>'[]'`, args...)
 	if err == nil {
 		for rows.Next() {
 			var s string
@@ -450,7 +524,7 @@ func handleFacets(w http.ResponseWriter, r *http.Request) {
 	out["tags"] = tags
 	var total, fav int
 	var bytesAll int64
-	_ = db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(favorite),0), COALESCE(SUM(bytes),0) FROM images`).Scan(&total, &fav, &bytesAll)
+	_ = db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(i.favorite),0), COALESCE(SUM(i.bytes),0) FROM images i WHERE `+scope, args...).Scan(&total, &fav, &bytesAll)
 	out["total"] = total
 	out["favorites"] = fav
 	out["bytes"] = bytesAll
@@ -459,49 +533,13 @@ func handleFacets(w http.ResponseWriter, r *http.Request) {
 
 // ---------- 设置 & 清理 ----------
 
-func handleSettingsGet(w http.ResponseWriter, r *http.Request) {
-	days, _ := strconv.Atoi(getSetting("retention_days", "0"))
-	var total, fav int
-	var bytesAll int64
-	_ = db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(favorite),0), COALESCE(SUM(bytes),0) FROM images`).Scan(&total, &fav, &bytesAll)
-	writeJSON(w, map[string]any{"retention_days": days, "images": total, "favorites": fav, "bytes": bytesAll, "version": version})
-}
-
-func handleSettingsPut(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		RetentionDays *int `json:"retention_days"`
-		CleanNow      bool `json:"clean_now"`
-	}
-	if err := readJSON(r, &in); err != nil {
-		httpErr(w, 400, err.Error())
-		return
-	}
-	if in.RetentionDays != nil {
-		d := *in.RetentionDays
-		if d < 0 {
-			d = 0
-		}
-		_ = setSetting("retention_days", strconv.Itoa(d))
-	}
-	removed := 0
-	if in.CleanNow {
-		removed = cleanupOnce()
-	}
-	handleSettingsGetWith(w, removed)
-}
-
-func handleSettingsGetWith(w http.ResponseWriter, removed int) {
-	days, _ := strconv.Atoi(getSetting("retention_days", "0"))
-	writeJSON(w, map[string]any{"retention_days": days, "removed": removed})
-}
-
 // cleanupOnce 清理超过保留天数且未收藏的历史图片；收藏的资产永远不动
 func cleanupOnce() int {
-	days, _ := strconv.Atoi(getSetting("retention_days", "0"))
-	if days <= 0 {
+	hours := retentionHours()
+	if hours <= 0 {
 		return 0
 	}
-	cut := time.Now().Add(-time.Duration(days) * 24 * time.Hour).UnixMilli()
+	cut := time.Now().Add(-time.Duration(hours) * time.Hour).UnixMilli()
 	rows, err := db.Query(`SELECT id FROM images WHERE favorite=0 AND created_at<?`, cut)
 	if err != nil {
 		return 0
@@ -519,7 +557,9 @@ func cleanupOnce() int {
 	}
 	_, _ = db.Exec(`DELETE FROM jobs WHERE status<>'running' AND status<>'queued' AND created_at<? AND id NOT IN (SELECT job_id FROM images)`, cut)
 	// 过期参考图
-	rrows, err := db.Query(`SELECT id,file FROM refs WHERE created_at<?`, cut)
+	// 参考图至少保留一天，免得输入框里刚上传的图被清掉
+	refCut := min(cut, time.Now().Add(-24*time.Hour).UnixMilli())
+	rrows, err := db.Query(`SELECT id,file FROM refs WHERE created_at<?`, refCut)
 	if err == nil {
 		type rf struct {
 			id   int64
@@ -548,6 +588,6 @@ func cleanupLoop() {
 	time.Sleep(time.Minute)
 	for {
 		cleanupOnce()
-		time.Sleep(6 * time.Hour)
+		time.Sleep(15 * time.Minute)
 	}
 }

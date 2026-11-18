@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { api, type Channel, type Params } from './api'
+import { api, type Channel, type MeInfo, type Me, type Quota, type Params } from './api'
 import { fillVars } from './data/snippets'
 
 export type Route = 'generate' | 'compare' | 'assets' | 'settings'
@@ -21,6 +21,7 @@ export type ThemePref = 'system' | 'light' | 'dark'
 interface Toast { id: number; text: string; kind: 'ok' | 'err' | 'info' }
 
 interface Store {
+  me: Me; isAdmin: boolean; quota: Quota | null; retentionHours: number; reloadMe: () => void
   route: Route; go: (r: Route) => void
   channels: Channel[]; reloadChannels: () => Promise<void>; channelsLoaded: boolean
   composer: Composer; setComposer: (p: Partial<Composer> | ((c: Composer) => Partial<Composer>)) => void
@@ -53,7 +54,9 @@ export function applyTheme(t: ThemePref) {
   meta.forEach(m => m.setAttribute('content', dark ? '#0E0F0F' : '#F4F5F1'))
 }
 
-export function StoreProvider({ children }: { children: ReactNode }) {
+export function StoreProvider({ children, info }: { children: ReactNode; info: MeInfo }) {
+  const [meInfo, setMeInfo] = useState<MeInfo>(info)
+  const reloadMe = useCallback(() => { api<MeInfo>('/api/me').then(x => { if (x.authed) setMeInfo(x) }).catch(() => {}) }, [])
   const [route, setRoute] = useState<Route>(() => routeFromPath(location.pathname))
   const [channels, setChannels] = useState<Channel[]>([])
   const [channelsLoaded, setLoaded] = useState(false)
@@ -133,7 +136,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const finalPrompt = useMemo(() => buildPrompt(composer), [composer])
   const bumpGallery = useCallback(() => setTick(x => x + 1), [])
 
-  const value: Store = { route, go, channels, reloadChannels, channelsLoaded, composer, setComposer, addChip, finalPrompt, toast, toasts, theme, setTheme, galleryTick, bumpGallery, market, openMarket, closeMarket, genView, setGenView }
+  const me = meInfo.user!
+  const value: Store = { me, isAdmin: me.role === 'admin', quota: meInfo.quota || null, retentionHours: meInfo.retention_hours || 0, reloadMe, route, go, channels, reloadChannels, channelsLoaded, composer, setComposer, addChip, finalPrompt, toast, toasts, theme, setTheme, galleryTick, bumpGallery, market, openMarket, closeMarket, genView, setGenView }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 
